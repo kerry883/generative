@@ -3,6 +3,7 @@ import { Showcase } from "@/components/showcase";
 import Features from "@/components/feature-section";
 import Footer from "@/components/footer";
 import { Header } from "@/components/header";
+import CallToAction from "@/components/calltoaction";
 
 export default function Page() {
   return (
@@ -13,6 +14,7 @@ export default function Page() {
       </main>
       <Showcase />
       <Features />
+      <CallToAction />
       <Footer />
     </div>
   );

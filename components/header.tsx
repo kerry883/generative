@@ -6,11 +6,13 @@ import React from "react";
 import { cn } from "@/lib/utils";
 import Image from "next/image";
 import { useTheme } from "next-themes";
+import { useGuestIdentity } from "@/lib/fingerprinthook";
 
 export const Header = () => {
   const [menuState, setMenuState] = React.useState(false);
   const [isScrolled, setIsScrolled] = React.useState(false);
   const { theme, setTheme } = useTheme();
+  const { guestId } = useGuestIdentity();
 
   React.useEffect(() => {
     const handleScroll = () => {
@@ -66,7 +68,11 @@ export const Header = () => {
                   <span className="sr-only">Toggle theme</span>
                 </Button>
                 <Button size="sm" className={cn(isScrolled && "lg:hidden")}>
-                  <Link href="/sign-up">
+                  <Link
+                    href={`https://foldex.space/claim?claim_guest_id=${guestId}`}
+                    target="_blank"
+                    className="cursor-pointer"
+                  >
                     <span>Join Foldex</span>
                   </Link>
                 </Button>
@@ -74,7 +80,11 @@ export const Header = () => {
                   size="sm"
                   className={cn(isScrolled ? "lg:inline-flex" : "hidden")}
                 >
-                  <Link href="/sign-up">
+                  <Link
+                    href={`https://foldex.space/claim?claim_guest_id=${guestId}`}
+                    target="_blank"
+                    className="cursor-pointer"
+                  >
                     <span>Join Foldex</span>
                   </Link>
                 </Button>

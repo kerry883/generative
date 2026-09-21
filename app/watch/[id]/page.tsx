@@ -2,7 +2,7 @@
 
 import React from "react";
 import { useParams, useRouter } from "next/navigation";
-import { useQuery } from "convex/react";
+import { useMutation, useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { Id } from "@/convex/_generated/dataModel";
 import {
@@ -23,6 +23,7 @@ import { Header } from "@/components/header";
 import { formatRelativeTime } from "@/lib/dateformater";
 import Image from "next/image";
 import { Separator } from "@/components/ui/separator";
+import { toast } from "sonner";
 
 // YouTube-style sidebar video item component
 interface SidebarVideoItemProps {
@@ -118,6 +119,20 @@ export default function WatchPage() {
   const video = useQuery(api.videos.getvideobyId, {
     videoId: videoId,
   });
+  const retry = useMutation(api.videos.retryvideo);
+
+  const handleRetry = async () => {
+    if (!video?.prompt) {
+      toast.error("Failed to retry video generation");
+      return;
+    }
+    try {
+      await retry({ videoId: videoId });
+      toast.success("Video generation started");
+    } catch (error) {
+      toast.error("Failed to retry video generation");
+    }
+  };
 
   // Fetch guest's other videos for sidebar
   const guestVideos = useQuery(
@@ -396,7 +411,7 @@ export default function WatchPage() {
                   <Button
                     variant="outline"
                     className="mt-4 border-white/10 bg-white/5 hover:bg-white/10 text-white gap-2"
-                    onClick={() => window.location.reload()}
+                    onClick={handleRetry}
                   >
                     <RefreshCcw className="w-4 h-4" />
                     Try Again

@@ -28,8 +28,8 @@ export function ClaimVideoDialog({
   const handleSignup = () => {
     // Pass the guestId in the URL so the main app can claim the videos
     const signupUrl = guestId
-      ? `https://foldex.space/signup?claim_guest_id=${encodeURIComponent(guestId)}`
-      : "https://foldex.space/signup";
+      ? `https://foldex.space/claim?claim_guest_id=${encodeURIComponent(guestId)}`
+      : "https://foldex.space/sign-in";
     window.open(signupUrl, "_blank");
     onClose();
   };
@@ -42,7 +42,7 @@ export function ClaimVideoDialog({
             <Sparkles className="h-6 w-6 text-primary" />
           </div>
           <AlertDialogTitle className="text-center text-xl">
-            Your Video is Being Generated! 🎉
+            Your Video is Being Generated!
           </AlertDialogTitle>
           <AlertDialogDescription className="text-center space-y-3">
             <p>
@@ -76,11 +76,18 @@ export function ClaimVideoDialog({
         </AlertDialogHeader>
 
         <AlertDialogFooter className="flex-col gap-2 sm:flex-col">
-          <Button onClick={handleSignup} className="w-full gap-2">
+          <Button
+            onClick={handleSignup}
+            className="w-full gap-2 cursor-pointer"
+          >
             <Video className="h-4 w-4" />
             Join Foldex & Save My Videos
           </Button>
-          <Button variant="ghost" onClick={onClose} className="w-full">
+          <Button
+            variant="ghost"
+            onClick={onClose}
+            className="w-full cursor-pointer"
+          >
             Continue as Guest
           </Button>
         </AlertDialogFooter>

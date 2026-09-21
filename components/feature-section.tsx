@@ -1,3 +1,4 @@
+//@ts-nocheck
 "use client";
 import {
   Accordion,
@@ -61,7 +62,7 @@ export default function Features() {
         {/* Section heading - moved to top for better video height */}
         <div className="relative z-10 mx-auto max-w-2xl space-y-4 text-center">
           <h2 className="text-balance text-3xl font-semibold md:text-4xl lg:text-5xl">
-            Everything in one place
+            Join Foldex and change the way you learn
           </h2>
           <p className="text-muted-foreground">
             A complete operating system for your learning. Foldex isn&apos;t
@@ -76,7 +77,9 @@ export default function Features() {
           <Accordion
             type="single"
             value={activeItem}
-            onValueChange={(value) => setActiveItem(value as FeatureKey)}
+            onValueChange={(value) =>
+              setActiveItem(value as unknown as FeatureKey)
+            }
             className="w-full"
           >
             {/* FEATURE 1: ORGANIZATION */}

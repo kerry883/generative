@@ -21,7 +21,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Foldex Manim - AI Video Generator",
+  title: "Foldex - AI Video Generator",
   description: "Turn prompts, PDFs, and docs into stunning Manim videos",
 };
 
