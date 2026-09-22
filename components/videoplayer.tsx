@@ -158,15 +158,11 @@ export function VideoPlayer({
 
   const handleDownload = async () => {
     try {
-      const a = document.createElement("a");
-      a.href = src;
-      a.download = title ? `${title}.mp4` : "video.mp4";
-      a.target = "_blank";
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
+      const downloadUrl = `/api/download?url=${encodeURIComponent(src)}`;
+      window.location.href = downloadUrl;
     } catch (e) {
       console.error("Download failed", e);
+      // Fallback if fetch fails (usually due to CORS)
       window.open(src, "_blank");
     }
   };
@@ -230,7 +226,7 @@ export function VideoPlayer({
           className="absolute inset-0 flex items-center justify-center cursor-pointer"
           onClick={togglePlay}
         >
-          <div className="w-16 h-16 rounded-full bg-white/20 backdrop-blur-md flex items-center justify-center hover:bg-white/30 transition-all hover:scale-110 group/play">
+          <div className="w-16 h-16  bg-primary backdrop-blur-md flex items-center justify-center hover:bg-white/30 transition-all hover:scale-110 group/play">
             <Play className="w-8 h-8 text-white fill-white ml-1" />
           </div>
         </div>
@@ -329,7 +325,7 @@ export function VideoPlayer({
             {/* Download */}
             <button
               onClick={handleDownload}
-              className="text-white/70 hover:text-white hover:bg-white/10 p-1.5 rounded-md transition-all"
+              className="text-white/70 hover:text-white hover:bg-white/10 p-1.5 rounded-md cursor-pointer transition-all"
               title="Download Video"
             >
               <Download className="w-4 h-4" />
@@ -338,7 +334,7 @@ export function VideoPlayer({
             {/* Fullscreen */}
             <button
               onClick={toggleFullscreen}
-              className="text-white hover:text-purple-400 transition-colors"
+              className="text-white hover:text-purple-400 transition-colors cursor-pointer"
             >
               {isFullscreen ? (
                 <Minimize className="w-5 h-5" />

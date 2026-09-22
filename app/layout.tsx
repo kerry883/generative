@@ -4,6 +4,7 @@ import "./globals.css";
 import ConvexClientProvider from "@/providers/convexprovider";
 import { ThemeProvider } from "@/providers/themeprovider";
 import { Toaster } from "sonner";
+import { GlobalVideoListener } from "@/components/globallistener";
 
 const jetbrainsMono = JetBrains_Mono({
   subsets: ["latin"],
@@ -46,6 +47,7 @@ export default function RootLayout({
           >
             {children}
             <Toaster />
+            <GlobalVideoListener />
           </ThemeProvider>
         </body>
       </html>

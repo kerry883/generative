@@ -151,7 +151,7 @@ export default function WatchPage() {
 
   // --- SHARED CONTAINER STYLE ---
   const playerContainerClass =
-    "relative w-full aspect-video overflow-hidden bg-black shadow-2xl border border-white/10 flex flex-col items-center justify-center";
+    "relative w-full aspect-video overflow-hidden  border border-white/10 flex flex-col items-center justify-center";
 
   // Sidebar component (reusable across states)
   const Sidebar = () => (
@@ -185,7 +185,7 @@ export default function WatchPage() {
             <Button
               variant="outline"
               size="sm"
-              className="mt-3"
+              className="mt-3 cursor-pointer"
               onClick={() => router.push("/")}
             >
               Create another video
@@ -266,16 +266,14 @@ export default function WatchPage() {
                     <VideoOff className="w-8 h-8 text-muted-foreground" />
                   </div>
 
-                  <h3 className="text-xl font-medium text-white">
-                    Video Not Found
-                  </h3>
-                  <p className="text-white/60 max-w-md px-4">
+                  <h3 className="text-xl font-medium ">Video Not Found</h3>
+                  <p className="text-muted-foreground max-w-md px-4">
                     This video doesn&apos;t exist or may have been deleted.
                   </p>
 
                   <Button
                     variant="outline"
-                    className="mt-4 border-white/10 bg-white/5 hover:bg-white/10 text-white gap-2"
+                    className="mt-4 cursor-pointer gap-2"
                     onClick={() => router.push("/")}
                   >
                     Go Home
@@ -295,7 +293,7 @@ export default function WatchPage() {
   // --- STATE 2: GENERATING ---
   if (video.status === "generating") {
     return (
-      <div className="min-h-screen bg-background">
+      <div className="min-h-screen bg-background scrollbar-hidden">
         <Header />
         <div className="w-full h-10" />
         <div className="max-w-7xl mx-auto p-4 lg:p-6">
@@ -316,10 +314,10 @@ export default function WatchPage() {
                   </div>
 
                   <div className="space-y-2 max-w-sm">
-                    <h3 className="text-xl font-medium text-white tracking-tight">
-                      Crafting your Scene
+                    <h3 className="text-xl font-medium  tracking-tight">
+                      Generating your video...
                     </h3>
-                    <p className="text-sm text-white/60">
+                    <p className="text-sm text-muted-foreground">
                       AI is generating the animations, syncing audio, and
                       rendering frames...
                     </p>
@@ -373,7 +371,7 @@ export default function WatchPage() {
   // --- STATE 3: FAILED ---
   if (video.status === "failed") {
     return (
-      <div className="min-h-screen bg-background">
+      <div className="min-h-screen bg-background scrollbar-hidden">
         <Header />
         <div className="w-full h-10" />
         <div className="max-w-7xl mx-auto p-4 lg:p-6">
@@ -400,17 +398,16 @@ export default function WatchPage() {
                     <AlertCircle className="w-8 h-8 text-destructive" />
                   </div>
 
-                  <h3 className="text-xl font-medium text-white">
-                    Generation Failed
-                  </h3>
-                  <p className="text-white/60 max-w-md px-4">
-                    We couldn&apos;t render this video. This usually happens if
-                    the prompt was too complex for the current model.
+                  <h3 className="text-xl font-medium ">Generation Failed</h3>
+                  <p className="text-muted-foreground max-w-md px-4">
+                    Sorry, we couldn&apos;t render this video.
+                    <br />
+                    Please try again.
                   </p>
 
                   <Button
                     variant="outline"
-                    className="mt-4 border-white/10 bg-white/5 hover:bg-white/10 text-white gap-2"
+                    className="mt-4  gap-2"
                     onClick={handleRetry}
                   >
                     <RefreshCcw className="w-4 h-4" />
@@ -440,11 +437,10 @@ export default function WatchPage() {
 
   // --- STATE 4: SUCCESS (ACTUAL PLAYER) ---
   return (
-    <div className="min-h-screen bg-background">
+    <div className="min-h-screen bg-background scrollbar-hidden">
       <Header />
+      <div className="w-full h-10" />
       <div className="max-w-7xl mx-auto p-4 lg:p-6">
-        <div className="w-full h-10" />
-
         <div className="flex flex-col lg:flex-row gap-6">
           {/* Main Content - Video + Details */}
           <div className="flex-1 space-y-6">

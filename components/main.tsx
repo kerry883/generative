@@ -1,7 +1,14 @@
 "use client";
 import { useRef, useState } from "react";
 import { Input } from "./ui/input";
-import { FileText, SendHorizonal, Upload, X, Sparkles } from "lucide-react";
+import {
+  FileText,
+  SendHorizonal,
+  Upload,
+  X,
+  Sparkles,
+  Loader2,
+} from "lucide-react";
 import { Button } from "./ui/button";
 import { cn } from "@/lib/utils";
 import { Label } from "./ui/label";
@@ -183,7 +190,11 @@ const Main = () => {
                 prompt ? "opacity-100 scale-100" : "opacity-0 scale-90",
               )}
             >
-              <SendHorizonal className="h-5 w-5" />
+              {isGenerating ? (
+                <Loader2 className="h-5 w-5 animate-spin" />
+              ) : (
+                <SendHorizonal className="h-5 w-5" />
+              )}
             </Button>
           </div>
         </div>

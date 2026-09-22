@@ -84,7 +84,7 @@ export const Showcase = () => {
         <section className="space-y-6">
           <div className="flex items-center gap-2">
             <Sparkles className="h-5 w-5 text-primary" />
-            <h2 className="text-xl font-bold tracking-tight">Showcase</h2>
+            <h2 className="text-xl font-bold tracking-tight">Featured </h2>
             <span className="text-sm text-muted-foreground ml-2">
               Videos created by the community
             </span>

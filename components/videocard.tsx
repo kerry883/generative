@@ -224,8 +224,8 @@ const Videocard = ({ videoId, onClick, allowed }: VideocardProps) => {
 
         {/* Play Button Overlay - Shows on Hover */}
         <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex items-center justify-center">
-          <div className="bg-white/95 rounded-full p-4 transform scale-90 group-hover:scale-100 transition-transform duration-300 shadow-lg">
-            <Play className="w-6 h-6 text-black fill-black" />
+          <div className="bg-primary p-4 transform scale-90 group-hover:scale-100 transition-transform duration-300 shadow-lg">
+            <Play className="w-6 h-6 text-white fill-white" />
           </div>
         </div>
       </div>

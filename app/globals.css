@@ -125,15 +125,26 @@
   }
 }
 
-@layer utilities {
-  /* Hide scrollbar for Chrome, Safari and Opera */
-  .scrollbar-hidden::-webkit-scrollbar {
-    display: none;
+@layer base {
+  /* Width for vertical scrollbars, Height for horizontal */
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
   }
 
-  /* Hide scrollbar for IE, Edge and Firefox */
-  .scrollbar-hidden {
-    -ms-overflow-style: none; /* IE and Edge */
-    scrollbar-width: none; /* Firefox */
+  /* The background of the scrollbar (transparent looks best) */
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  /* The moving part of the scrollbar */
+  ::-webkit-scrollbar-thumb {
+    background-color: var(--color-border); /* Matches your border color */
+    border-radius: 9999px; /* Fully rounded pills */
+  }
+
+  /* Darker on hover so user knows they can grab it */
+  ::-webkit-scrollbar-thumb:hover {
+    background-color: var(--color-muted-foreground); 
   }
 }
