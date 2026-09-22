@@ -77,9 +77,11 @@ export default function Features() {
           <Accordion
             type="single"
             value={activeItem}
-            onValueChange={(value) =>
-              setActiveItem(value as unknown as FeatureKey)
-            }
+            onValueChange={(value) => {
+              if (value) {
+                setActiveItem(value as FeatureKey);
+              }
+            }}
             className="w-full"
           >
             {/* FEATURE 1: ORGANIZATION */}
