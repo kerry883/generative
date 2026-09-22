@@ -13,18 +13,20 @@ import {
   Download,
   Loader2,
   Subtitles,
+  Lock,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
+import { toast } from "sonner";
 
 interface VideoPlayerProps {
   src: string;
   poster?: string;
   className?: string;
   title?: string;
-  transcript?: string; // Add transcript prop
+  transcript?: string;
 }
 
 export function VideoPlayer({
@@ -48,8 +50,8 @@ export function VideoPlayer({
   const [isLoading, setIsLoading] = useState(true);
   const [showSubtitles, setShowSubtitles] = useState(false);
   const [currentSubtitle, setCurrentSubtitle] = useState("");
-  const candownload = useQuery(api.subscriptions.canDownloadVideo);
-  const [opensubscriptiondialog, setOpensubscriptiondialog] = useState(false);
+  const canDownload = useQuery(api.subscriptions.canDownloadVideo);
+  const canDownloadAllowed = canDownload?.allowed ?? false;
 
   // Format time (e.g., 65s -> 1:05)
   const formatTime = (time: number) => {
@@ -157,15 +159,43 @@ export function VideoPlayer({
   };
 
   const handleDownload = async () => {
+    if (!canDownloadAllowed) {
+      toast.error("Pro feature", {
+        description: "Upgrade to Pro to download videos.",
+      });
+      return;
+    }
     try {
       const downloadUrl = `/api/download?url=${encodeURIComponent(src)}`;
       window.location.href = downloadUrl;
     } catch (e) {
       console.error("Download failed", e);
-      // Fallback if fetch fails (usually due to CORS)
       window.open(src, "_blank");
     }
   };
+
+  // Prevent right-click context menu on video
+  const handleContextMenu = (e: React.MouseEvent) => {
+    e.preventDefault();
+    if (!canDownloadAllowed) {
+      toast.error("Downloads are for Pro users only");
+    }
+  };
+
+  // Block Ctrl+S save shortcut
+  useEffect(() => {
+    const handleSaveShortcut = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === "s") {
+        e.preventDefault();
+        if (!canDownloadAllowed) {
+          toast.error("Downloads are for Pro users only");
+        }
+      }
+    };
+
+    window.addEventListener("keydown", handleSaveShortcut);
+    return () => window.removeEventListener("keydown", handleSaveShortcut);
+  }, [canDownloadAllowed]);
 
   // Keyboard controls (spacebar to play/pause)
   useEffect(() => {
@@ -211,6 +241,8 @@ export function VideoPlayer({
         onCanPlay={() => setIsLoading(false)}
         onEnded={() => setIsPlaying(false)}
         onClick={togglePlay}
+        onContextMenu={handleContextMenu}
+        controlsList="nodownload"
       />
 
       {/* 2. Loading Overlay */}
@@ -325,10 +357,22 @@ export function VideoPlayer({
             {/* Download */}
             <button
               onClick={handleDownload}
-              className="text-white/70 hover:text-white hover:bg-white/10 p-1.5 rounded-md cursor-pointer transition-all"
-              title="Download Video"
+              className={cn(
+                "p-1.5 rounded-md cursor-pointer transition-all relative",
+                canDownloadAllowed
+                  ? "text-white/70 hover:text-white hover:bg-white/10"
+                  : "text-white/40 hover:text-white/60",
+              )}
+              title={
+                canDownloadAllowed
+                  ? "Download Video"
+                  : "Pro feature - Upgrade to download"
+              }
             >
               <Download className="w-4 h-4" />
+              {!canDownloadAllowed && (
+                <Lock className="w-2 h-2 absolute -top-0.5 -right-0.5 text-amber-400" />
+              )}
             </button>
 
             {/* Fullscreen */}

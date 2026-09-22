@@ -24,6 +24,8 @@ import { formatRelativeTime } from "@/lib/dateformater";
 import Image from "next/image";
 import { Separator } from "@/components/ui/separator";
 import { toast } from "sonner";
+import { useUser } from "@clerk/nextjs";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 
 // YouTube-style sidebar video item component
 interface SidebarVideoItemProps {
@@ -114,6 +116,7 @@ export default function WatchPage() {
   const router = useRouter();
   const videoId = params.id as Id<"videos">;
   const { guestId } = useGuestIdentity();
+  const { isSignedIn, user } = useUser();
 
   // Fetch video with guestId for permission check
   const video = useQuery(api.videos.getvideobyId, {
@@ -134,24 +137,39 @@ export default function WatchPage() {
     }
   };
 
-  // Fetch guest's other videos for sidebar
+  // Fetch videos for sidebar based on auth state
+  // Logged-in users: fetch their videos
+  // Guests: fetch guest videos
+  const userVideos = useQuery(
+    api.videos.getusersvideo,
+    isSignedIn ? {} : "skip",
+  );
   const guestVideos = useQuery(
     api.guest.getguestvideo,
-    guestId ? { guestId } : "skip",
+    !isSignedIn && guestId ? { guestId } : "skip",
   );
 
-  // Fetch public showcase videos
-  const publicVideos = useQuery(api.videos.getpublicvideos);
+  // Fetch public showcase videos (only for guests)
+  const publicVideos = useQuery(
+    api.videos.getpublicvideos,
+    !isSignedIn ? undefined : "skip",
+  );
 
-  // Filter out current video from sidebar and get showcase videos
-  const sidebarVideos = guestVideos?.filter((v) => v._id !== videoId);
-  const showcaseVideos = publicVideos
-    ?.filter((v) => v._id !== videoId && v.guestId !== guestId)
-    ?.slice(0, 3);
+  // Filter out current video from sidebar
+  const sidebarVideos = isSignedIn
+    ? userVideos?.filter((v) => v._id !== videoId)
+    : guestVideos?.filter((v) => v._id !== videoId);
+
+  // Showcase only for guests
+  const showcaseVideos = !isSignedIn
+    ? publicVideos
+        ?.filter((v) => v._id !== videoId && v.guestId !== guestId)
+        ?.slice(0, 3)
+    : [];
 
   // --- SHARED CONTAINER STYLE ---
   const playerContainerClass =
-    "relative w-full aspect-video overflow-hidden  border border-white/10 flex flex-col items-center justify-center";
+    "relative w-full aspect-video overflow-hidden  flex flex-col items-center justify-center";
 
   // Sidebar component (reusable across states)
   const Sidebar = () => (
@@ -163,7 +181,9 @@ export default function WatchPage() {
         </h3>
 
         {/* Loading State */}
-        {guestVideos === undefined && <SidebarSkeleton />}
+        {guestVideos === undefined && userVideos === undefined && (
+          <SidebarSkeleton />
+        )}
 
         {/* Videos List */}
         {sidebarVideos && sidebarVideos.length > 0 && (
@@ -300,7 +320,12 @@ export default function WatchPage() {
           <div className="flex flex-col lg:flex-row gap-6">
             {/* Main Content */}
             <div className="flex-1 space-y-4">
-              <div className={playerContainerClass}>
+              <div
+                className={cn(
+                  playerContainerClass,
+                  "border-primary bg-primary/20",
+                )}
+              >
                 {/* Animated Background Mesh */}
                 <div className="absolute inset-0 opacity-20 bg-[radial-gradient(circle_at_center,_var(--tw-gradient-stops))] from-primary via-transparent to-transparent animate-pulse" />
 
@@ -462,6 +487,34 @@ export default function WatchPage() {
                   {formatRelativeTime(video._creationTime)}
                 </p>
               </div>
+
+              <Separator />
+
+              {/* Creator Section - YouTube Style */}
+              {(video.creatorname || video.creatorprofile) && (
+                <div className="flex items-center gap-3 py-2">
+                  <Avatar className="h-10 w-10">
+                    <AvatarImage
+                      src={video.creatorprofile}
+                      alt={video.creatorname || "Creator"}
+                      className="rounded-none"
+                    />
+                    <AvatarFallback className="rounded-none">
+                      {video.creatorname
+                        ?.split(" ")
+                        .map((n) => n[0])
+                        .join("")
+                        .toUpperCase()
+                        .slice(0, 2) || "U"}
+                    </AvatarFallback>
+                  </Avatar>
+                  <div>
+                    <p className="font-semibold text-foreground">
+                      {video.creatorname || "Anonymous"}
+                    </p>
+                  </div>
+                </div>
+              )}
 
               <Separator />
 

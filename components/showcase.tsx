@@ -18,6 +18,7 @@ export const Showcase = () => {
     api.guest.getguestvideo,
     guestId ? { guestId } : "skip",
   );
+  const uservideos = useQuery(api.videos.getusersvideo);
 
   // Fetch public showcase videos
   const publicVideos = useQuery(api.videos.getpublicvideos);
@@ -25,7 +26,7 @@ export const Showcase = () => {
   // Filter showcase videos to exclude guest's own videos
   const showcaseVideos = publicVideos
     ?.filter((video) => video.guestId !== guestId)
-    ?.slice(0, 6);
+    ?.slice(0, 4);
 
   const handleVideoClick = (videoId: Id<"videos">) => {
     router.push(`/watch/${videoId}`);
@@ -54,6 +55,24 @@ export const Showcase = () => {
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
               {guestVideos.map((video) => (
+                <Videocard
+                  key={video._id}
+                  videoId={video._id}
+                  onClick={() => handleVideoClick(video._id)}
+                  allowed={true}
+                />
+              ))}
+            </div>
+          </section>
+        )}
+        {uservideos && uservideos.length > 0 && (
+          <section className="space-y-6">
+            <div className="flex items-center gap-2">
+              <Video className="h-5 w-5 text-primary" />
+              <h2 className="text-xl font-bold tracking-tight">Your Videos</h2>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+              {uservideos.map((video) => (
                 <Videocard
                   key={video._id}
                   videoId={video._id}

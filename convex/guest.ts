@@ -1,6 +1,7 @@
 import { convexToJson, v } from "convex/values";
 import { mutation, query } from "./_generated/server";
 import { api } from "./_generated/api";
+import { Id } from "./_generated/dataModel";
 
 
 export const schedulevideogeneration = mutation({
@@ -60,7 +61,91 @@ export const getguestvideo = query({
   },
   handler: async (ctx ,args)=>{
     const videos = await ctx.db.query("videos").withIndex("by_guest",(q)=>q.eq("guestId",args.guestId)).collect();
-    
+
     return videos;
+  }
+})
+
+export const claimguestvideo = mutation({
+  args:{
+    guestId:v.string(),
+    folderId:v.optional(v.id("folders"))
+  },
+  handler: async (ctx ,args)=>{
+    const user = await ctx.auth.getUserIdentity();
+    if(!user){
+      throw new Error("Not authenticated");
+    }
+    
+    // Get guest videos
+    const videos = await ctx.db.query("videos").withIndex("by_guest",(q)=>q.eq("guestId",args.guestId)).collect();
+    
+    if(videos.length === 0){
+      return { success: false, message: "No videos found for this guest ID" };
+    }
+    
+    let targetFolderId: Id<"folders">;
+    
+    // If folderId provided, verify it exists and belongs to user
+    if(args.folderId){
+      const folder = await ctx.db.get(args.folderId);
+      if(!folder || folder.userId !== user.subject){
+        throw new Error("Folder not found or access denied");
+      }
+      targetFolderId = args.folderId;
+    } else {
+      // Create "Your Videos" folder for new users
+      const newFolderId = await ctx.runMutation(api.folders.createFolder,{
+        name:"Your Videos",
+      });
+      targetFolderId = newFolderId;
+    }
+    
+    // Claim all videos
+    for(const video of videos){
+      await ctx.db.patch(video._id,{
+        userId:user.subject,
+        folderId:targetFolderId,
+        guestId:undefined,
+        creatorname:user.name,
+        creatorprofile:user.pictureUrl
+      })
+    }
+    
+    return { 
+      success: true, 
+      folderId: targetFolderId, 
+      videoCount: videos.length 
+    };
+  }
+})
+
+export const claimguest = mutation({
+  args:{
+    guestId:v.string()
+  },
+  handler: async (ctx ,args)=>{
+    const user = await ctx.auth.getUserIdentity();
+    if(!user){
+      throw new Error("Not authenticated");
+    }
+    const videos = await ctx.db.query("videos").withIndex("by_guest",(q)=>q.eq("guestId",args.guestId)).collect();
+    const videocount = videos.filter((v)=>v.status === "ready").length;
+    const newFolderId = await ctx.runMutation(api.folders.createFolder,{
+        name:"Your Videos",
+      });
+
+    for(const video of videos){
+      await ctx.db.patch(video._id,{
+        userId:user.subject,
+        folderId:newFolderId,
+        guestId:undefined,
+        creatorname:user.name,
+        creatorprofile:user.pictureUrl
+      })
+      await ctx.runMutation(api.subscriptions.trackVideoGeneration,{
+        userId:user.subject,
+      })
+    }
   }
 })

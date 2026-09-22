@@ -2,6 +2,8 @@ import { v } from "convex/values";
 import { action, mutation, query } from "./_generated/server";
 import { api } from "./_generated/api";
 import { z } from "zod";
+import { DatabaseReader } from "./_generated/server";
+import { Doc, Id } from "./_generated/dataModel";
 
 export const addVideo = mutation({
   args: {
@@ -81,6 +83,14 @@ export const getpublicvideos = query({
   }
 })
 
+export const getusersvideo = query({
+  handler: async (ctx) => {
+    const user = await ctx.auth.getUserIdentity();
+    if(!user) return null;
+    const videos = await ctx.db.query("videos").withIndex("by_user",(q)=>q.eq("userId",user.subject)).collect();
+    return videos;
+  }
+})
 export const makepublic = mutation({
   args:{
     videoId:v.id('videos')
@@ -380,6 +390,8 @@ export const schedulevideogeneration = mutation({
       status: "generating",
       prompt: args.prompt, // Store original prompt
       public: false,
+      creatorname:user.name,
+      creatorprofile:user.pictureUrl
     });
     console.log("Created video entry:", videoId);
     
@@ -390,6 +402,35 @@ export const schedulevideogeneration = mutation({
       prompt: args.prompt,
       context: args.context,
       userId: user.subject
+    });
+    
+    return videoId;
+  },
+});
+
+export const scheduleauthvideo = mutation({
+  args: {
+    prompt: v.string(),
+    context: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const user = await ctx.auth.getUserIdentity();
+    if (!user) throw Error("Not authenticated");
+    
+    const videoId = await ctx.db.insert("videos", {
+      userId: user.subject,
+      status: "generating",
+      prompt: args.prompt,
+      public: false,
+      creatorname:user.name,
+      creatorprofile:user.pictureUrl
+    });
+    
+    await ctx.scheduler.runAfter(0, api.videos.triggerVideoGeneration, {
+      videoId,
+      prompt: args.prompt,
+      context: args.context,
+      userId: user.subject,
     });
     
     return videoId;
@@ -517,5 +558,80 @@ export const replaceOldDomains = mutation({
     }
 
     return `Success! Updated ${updatedCount} videos and thumbnails to the new domain.`;
+  },
+});
+
+async function getDailyFreeVideoIds(db: DatabaseReader): Promise<Id<"videos">[]> {
+  const allPublic = await db
+    .query("videos")
+    .withIndex("by_public", (q) => q.eq("public", true))
+    .filter((q) => q.eq(q.field("status"), "ready"))
+    .collect();
+
+  if (allPublic.length <= 5) {
+    return allPublic.map((v) => v._id);
+  }
+
+  // Use date as seed for consistent daily rotation
+  const today = new Date();
+  const seed =
+    today.getFullYear() * 10000 + (today.getMonth() + 1) * 100 + today.getDate();
+
+  // Simple seeded shuffle
+  const shuffled = [...allPublic].sort((a, b) => {
+    const hashA = (seed * a._creationTime) % 1000;
+    const hashB = (seed * b._creationTime) % 1000;
+    return hashA - hashB;
+  });
+
+  return shuffled.slice(0, 5).map((v) => v._id);
+}
+
+export const getDailyFreeVideos = query({
+  args: {},
+  handler: async (ctx) => {
+    return await getDailyFreeVideoIds(ctx.db);
+  },
+});
+
+// 3️⃣ Check if video is free (Calls helper directly)
+export const isVideoFreeToday = query({
+  args: { videoId: v.id("videos") },
+  handler: async (ctx, args) => {
+    // FIX: Call the helper function, NOT ctx.runQuery
+    const freeIds = await getDailyFreeVideoIds(ctx.db);
+    return freeIds.includes(args.videoId);
+  },
+});
+
+// 4️⃣ Get public videos with lock status (Calls helper directly)
+export const getPublicVideosWithAccess = query({
+  args: {},
+  handler: async (ctx) => {
+    const user = await ctx.auth.getUserIdentity();
+
+    const videos = await ctx.db
+      .query("videos")
+      .withIndex("by_public", (q) => q.eq("public", true))
+      .filter((q) => q.eq(q.field("status"), "ready"))
+      .order("desc")
+      .collect();
+
+    // Pro users or video owners get full access
+    if (user) {
+      const subscription = await ctx.runQuery(api.subscriptions.getSubscription);
+      if (subscription?.tier === "pro") {
+        return videos.map((v) => ({ ...v, isLocked: false, isFreeToday: false }));
+      }
+    }
+
+    // FIX: Call the helper function, NOT ctx.runQuery
+    const freeIds = await getDailyFreeVideoIds(ctx.db);
+
+    return videos.map((v) => ({
+      ...v,
+      isLocked: !freeIds.includes(v._id),
+      isFreeToday: freeIds.includes(v._id),
+    }));
   },
 });

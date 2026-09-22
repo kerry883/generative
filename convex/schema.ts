@@ -185,6 +185,8 @@ export default defineSchema({
       url:v.string(),
       snippet:v.string(),
     }))),
+    creatorname:v.optional(v.string()),
+    creatorprofile:v.optional(v.string())
    })
    .index("by_user",["userId"])
    .index("by_folder",["folderId"])

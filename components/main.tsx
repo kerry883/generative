@@ -1,6 +1,5 @@
 "use client";
 import { useRef, useState } from "react";
-import { Input } from "./ui/input";
 import {
   FileText,
   SendHorizonal,
@@ -17,7 +16,11 @@ import { toast } from "sonner";
 import { useRouter } from "next/navigation";
 import { useGuestIdentity } from "@/lib/fingerprinthook";
 import { Textarea } from "./ui/textarea";
-import { ClaimVideoDialog } from "./claim-video-dialog";
+import { LoginPromptDialog } from "./login-prompt-dialog";
+import { useUser, useAuth } from "@clerk/nextjs";
+import { useQuery } from "convex/react";
+import { api } from "@/convex/_generated/api";
+import SubscriptionDialog from "./pricingdialog";
 
 const Main = () => {
   const router = useRouter();
@@ -27,36 +30,104 @@ const Main = () => {
   const [isGenerating, setisGenerating] = useState(false);
   const { guestId, fingerprint } = useGuestIdentity();
 
-  // Dialog state
-  const [showClaimDialog, setShowClaimDialog] = useState(false);
+  // Auth state
+  const { isSignedIn, user } = useUser();
+  const { getToken } = useAuth();
+
+  // Subscription checks
+  const canGenerate = useQuery(api.subscriptions.canGenerateVideo);
+
+  // Dialog states
+  const [showLoginPrompt, setShowLoginPrompt] = useState(false);
+  const [showPricing, setShowPricing] = useState(false);
   const [pendingVideoId, setPendingVideoId] = useState<string | null>(null);
   const [pendingVideoTitle, setPendingVideoTitle] = useState<string>("");
 
   const suggestions = [
     "Explain Neural Networks",
-    "Explain Quantum Physics",
+    "Explain Machine Learning",
     "Explain Pythagorean theorem",
   ];
 
-  // Check if this is user's first video
-  const isFirstVideo = () => {
-    if (typeof window === "undefined") return true;
-    return !localStorage.getItem("foldex_has_generated_video");
-  };
+  // Handle authenticated user generation
+  const handleAuthGeneration = async () => {
+    // Check if user has reached their limit
+    if (canGenerate && !canGenerate.allowed) {
+      if (canGenerate.reason === "free_limit_reached") {
+        toast.error("You've reached your free video limit!", {
+          description: `You've used ${canGenerate.videosGenerated}/${canGenerate.videosLimit} free videos.`,
+          action: {
+            label: "Upgrade to Pro",
+            onClick: () => setShowPricing(true),
+          },
+          duration: 10000,
+        });
+      } else {
+        toast.error("Video generation limit reached. Try again later.");
+      }
+      return;
+    }
 
-  // Mark that user has generated a video
-  const markVideoGenerated = () => {
-    if (typeof window !== "undefined") {
-      localStorage.setItem("foldex_has_generated_video", "true");
+    setisGenerating(true);
+    try {
+      const formdata = new FormData();
+      formdata.append("prompt", prompt);
+      if (selectedfile) formdata.append("file", selectedfile);
+
+      // Get auth token for the API
+      const token = await getToken({ template: "convex" });
+
+      const response = await fetch("/api/generate-auth", {
+        method: "POST",
+        body: formdata,
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        const errorMessage =
+          typeof data.error === "string"
+            ? data.error
+            : JSON.stringify(data.error);
+
+        if (
+          errorMessage.toLowerCase().includes("limit") ||
+          errorMessage.toLowerCase().includes("upgrade")
+        ) {
+          toast.error("Video limit reached!", {
+            action: {
+              label: "Upgrade to Pro",
+              onClick: () => setShowPricing(true),
+            },
+          });
+          return;
+        }
+
+        throw new Error(errorMessage);
+      }
+
+      toast.success("Video submitted! We'll notify you when it's ready.");
+      router.replace(`/watch/${data.videoId}`);
+    } catch (error) {
+      console.error("video generation error", error);
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Video generation failed. Please try again.";
+      toast.error(message);
+    } finally {
+      setisGenerating(false);
     }
   };
 
-  const handlesend = async () => {
-    if (!prompt.trim()) return;
+  // Handle guest generation
+  const handleGuestGeneration = async () => {
     if (!guestId || !fingerprint) {
       toast.error("Please wait, initializing...");
       return;
     }
+
     setisGenerating(true);
     try {
       const formdata = new FormData();
@@ -72,12 +143,9 @@ const Main = () => {
 
       const data = await response.json();
 
-      // Handle error responses
       if (!response.ok) {
         const rawError =
           data.error || data.message || "Video generation failed";
-
-        // Force it to be a string
         const errorMessage =
           typeof rawError === "string" ? rawError : JSON.stringify(rawError);
 
@@ -86,38 +154,22 @@ const Main = () => {
           errorMessage.toLowerCase().includes("limit") ||
           errorMessage.toLowerCase().includes("sign up")
         ) {
-          toast.error("You've reached the free limit!", {
-            description: "Sign up for Foldex to create unlimited videos.",
-            action: {
-              label: "Join Foldex",
-              onClick: () =>
-                window.open(
-                  `https://foldex.space/signup?claim_guest_id=${guestId}`,
-                  "_blank",
-                ),
-            },
-            duration: 10000,
+          toast.error("You've reached the free guest limit!", {
+            description: "Sign in to continue creating videos.",
           });
+          setShowLoginPrompt(true);
           return;
         }
 
         throw new Error(errorMessage);
       }
 
-      // Success! Check if first video to show claim dialog
-      if (isFirstVideo()) {
-        markVideoGenerated();
-        setPendingVideoId(data.videoId);
-        setPendingVideoTitle(
-          prompt.slice(0, 50) + (prompt.length > 50 ? "..." : ""),
-        );
-        setShowClaimDialog(true);
-      } else {
-        toast.success(
-          "Video submitted successfully! We'll notify you when it's ready.",
-        );
-        router.replace(`/watch/${data.videoId}`);
-      }
+      // Success - show login prompt for guests
+      setPendingVideoId(data.videoId);
+      setPendingVideoTitle(
+        prompt.slice(0, 50) + (prompt.length > 50 ? "..." : ""),
+      );
+      setShowLoginPrompt(true);
     } catch (error) {
       console.error("video generation error", error);
       const message =
@@ -130,9 +182,19 @@ const Main = () => {
     }
   };
 
-  const handleDialogClose = () => {
-    setShowClaimDialog(false);
-    // Navigate to watch page after dialog closes
+  // Main send handler
+  const handlesend = async () => {
+    if (!prompt.trim()) return;
+
+    if (isSignedIn) {
+      await handleAuthGeneration();
+    } else {
+      await handleGuestGeneration();
+    }
+  };
+
+  const handleLoginPromptClose = () => {
+    setShowLoginPrompt(false);
     if (pendingVideoId) {
       router.replace(`/watch/${pendingVideoId}`);
     }
@@ -140,10 +202,39 @@ const Main = () => {
 
   return (
     <div className="flex flex-col min-h-screen items-center justify-center p-6 max-w-4xl mx-auto space-y-8">
+      <div className="w-full h-14" />
       {/* Header Section */}
       <div className="text-4xl font-bold tracking-tight text-center">
         Turn Any{" "}
-        <TextLoop className="overflow-y-clip text-primary">
+        <TextLoop
+          className="overflow-y-clip text-primary"
+          transition={{
+            type: "spring",
+            stiffness: 900,
+            damping: 80,
+            mass: 10,
+          }}
+          variants={{
+            initial: {
+              y: 20,
+              rotateX: 90,
+              opacity: 0,
+              filter: "blur(4px)",
+            },
+            animate: {
+              y: 0,
+              rotateX: 0,
+              opacity: 1,
+              filter: "blur(0px)",
+            },
+            exit: {
+              y: -20,
+              rotateX: -90,
+              opacity: 0,
+              filter: "blur(4px)",
+            },
+          }}
+        >
           <span>Prompts</span>
           <span>Pdfs</span>
           <span>Docs</span>
@@ -152,13 +243,13 @@ const Main = () => {
       </div>
 
       <div className="w-full space-y-4">
-        {/* Suggestions Section - Now at the Top */}
+        {/* Suggestions Section */}
         <div className="flex flex-wrap justify-center gap-2">
           {suggestions.map((suggestion) => (
             <button
               key={suggestion}
               onClick={() => setPrompt(suggestion)}
-              className="px-3 py-1.5 text-xs font-medium  border bg-background hover:bg-muted transition-colors flex items-center gap-1.5 text-muted-foreground hover:text-foreground"
+              className="px-3 py-1.5 text-xs font-medium border bg-background hover:bg-muted transition-colors flex items-center gap-1.5 text-muted-foreground hover:text-foreground"
             >
               <Sparkles className="h-3 w-3" />
               {suggestion}
@@ -166,8 +257,8 @@ const Main = () => {
           ))}
         </div>
 
-        {/* Improved AI Input Container */}
-        <div className="relative group  border bg-card shadow-sm hover:shadow-md transition-shadow focus-within:ring-2 focus-within:ring-primary/20 focus-within:border-primary">
+        {/* AI Input Container */}
+        <div className="relative group border bg-card shadow-sm hover:shadow-md transition-shadow focus-within:ring-2 focus-within:ring-primary/20 focus-within:border-primary">
           <Textarea
             value={prompt}
             onChange={(e) => setPrompt(e.target.value)}
@@ -210,7 +301,7 @@ const Main = () => {
 
           <div
             className={cn(
-              "relative group cursor-pointer border-dashed border-2  transition-all duration-200",
+              "relative group cursor-pointer border-dashed border-2 transition-all duration-200",
               selectedfile
                 ? "border-primary/30 bg-primary/5 p-3"
                 : "border-muted-foreground/20 hover:border-primary/40 hover:bg-muted/30 p-6",
@@ -228,7 +319,7 @@ const Main = () => {
             {selectedfile ? (
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-3">
-                  <div className="h-10 w-10  bg-background border flex items-center justify-center shadow-sm">
+                  <div className="h-10 w-10 bg-background border flex items-center justify-center shadow-sm">
                     <FileText className="h-5 w-5 text-primary" />
                   </div>
                   <div>
@@ -256,7 +347,7 @@ const Main = () => {
               <div className="flex flex-col items-center gap-2 text-center">
                 <Upload className="h-5 w-5 text-muted-foreground" />
                 <p className="text-sm text-muted-foreground">
-                  Drop a file or{" "}
+                  Drop a Pdf/Doc or{" "}
                   <span className="text-primary font-medium">browse</span>
                 </p>
               </div>
@@ -265,13 +356,15 @@ const Main = () => {
         </div>
       </div>
 
-      {/* Claim Video Dialog */}
-      <ClaimVideoDialog
-        isOpen={showClaimDialog}
-        onClose={handleDialogClose}
-        guestId={guestId}
+      {/* Login Prompt Dialog - for guests */}
+      <LoginPromptDialog
+        isOpen={showLoginPrompt}
+        onClose={handleLoginPromptClose}
         videoTitle={pendingVideoTitle}
       />
+
+      {/* Pricing Dialog - for limit reached */}
+      <SubscriptionDialog isOpen={showPricing} onOpenChange={setShowPricing} />
     </div>
   );
 };

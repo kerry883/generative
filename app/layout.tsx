@@ -5,6 +5,7 @@ import ConvexClientProvider from "@/providers/convexprovider";
 import { ThemeProvider } from "@/providers/themeprovider";
 import { Toaster } from "sonner";
 import { GlobalVideoListener } from "@/components/globallistener";
+import { ClerkProvider } from "@clerk/nextjs";
 
 const jetbrainsMono = JetBrains_Mono({
   subsets: ["latin"],
@@ -32,25 +33,27 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <ConvexClientProvider>
-      <html
-        lang="en"
-        className={jetbrainsMono.variable}
-        suppressHydrationWarning
-      >
-        <body className={`${geistSans.variable} ${geistMono.variable} `}>
-          <ThemeProvider
-            attribute="class"
-            defaultTheme="light"
-            enableSystem
-            disableTransitionOnChange
-          >
-            {children}
-            <Toaster />
-            <GlobalVideoListener />
-          </ThemeProvider>
-        </body>
-      </html>
-    </ConvexClientProvider>
+    <ClerkProvider>
+      <ConvexClientProvider>
+        <html
+          lang="en"
+          className={jetbrainsMono.variable}
+          suppressHydrationWarning
+        >
+          <body className={`${geistSans.variable} ${geistMono.variable} `}>
+            <ThemeProvider
+              attribute="class"
+              defaultTheme="light"
+              enableSystem
+              disableTransitionOnChange
+            >
+              {children}
+              <Toaster />
+              <GlobalVideoListener />
+            </ThemeProvider>
+          </body>
+        </html>
+      </ConvexClientProvider>
+    </ClerkProvider>
   );
 }

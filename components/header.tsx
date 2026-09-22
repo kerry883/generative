@@ -1,18 +1,22 @@
 "use client";
 import Link from "next/link";
-import { Folder, Menu, Moon, Sun, X } from "lucide-react";
+import { Menu, Moon, Sun, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import React from "react";
 import { cn } from "@/lib/utils";
 import Image from "next/image";
 import { useTheme } from "next-themes";
-import { useGuestIdentity } from "@/lib/fingerprinthook";
+import { useUser } from "@clerk/nextjs";
+import { AuthDialog } from "./auth";
+import { ProfileDropdown } from "./profile-dropdown";
+
+const menuItems = [{ name: "VideoVault", href: "/videovault" }];
 
 export const Header = () => {
   const [menuState, setMenuState] = React.useState(false);
   const [isScrolled, setIsScrolled] = React.useState(false);
   const { theme, setTheme } = useTheme();
-  const { guestId } = useGuestIdentity();
+  const { isSignedIn, isLoaded } = useUser();
 
   React.useEffect(() => {
     const handleScroll = () => {
@@ -21,6 +25,7 @@ export const Header = () => {
     window.addEventListener("scroll", handleScroll);
     return () => window.removeEventListener("scroll", handleScroll);
   }, []);
+
   return (
     <header>
       <nav
@@ -31,7 +36,7 @@ export const Header = () => {
           className={cn(
             "mx-auto mt-2 max-w-6xl px-6 transition-all duration-300 lg:px-12",
             isScrolled &&
-              "bg-background/50 max-w-4xl  border backdrop-blur-lg lg:px-5",
+              "bg-background/50 max-w-4xl border backdrop-blur-lg lg:px-5",
           )}
         >
           <div className="relative flex flex-wrap items-center justify-between gap-6 py-3 lg:gap-0 lg:py-4">
@@ -55,39 +60,93 @@ export const Header = () => {
             </div>
 
             <div className="bg-background in-data-[state=active]:block lg:in-data-[state=active]:flex mb-6 hidden w-full flex-wrap items-center justify-end space-y-8 rounded-3xl border p-6 shadow-2xl shadow-zinc-300/20 md:flex-nowrap lg:m-0 lg:flex lg:w-fit lg:gap-6 lg:space-y-0 lg:border-transparent lg:bg-transparent lg:p-0 lg:shadow-none dark:shadow-none dark:lg:bg-transparent">
-              <div className="flex w-full flex-col space-y-3 sm:flex-row sm:gap-3 sm:space-y-0 md:w-fit">
-                {/* Theme Toggle */}
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
-                  className={cn(isScrolled && "lg:hidden", "cursor-pointer")}
-                >
-                  <Sun className="h-4 w-4 rotate-0 scale-100 transition-all dark:-rotate-90 dark:scale-0" />
-                  <Moon className="absolute h-4 w-4 rotate-90 scale-0 transition-all dark:rotate-0 dark:scale-100" />
-                  <span className="sr-only">Toggle theme</span>
-                </Button>
-                <Button size="sm" className={cn(isScrolled && "lg:hidden")}>
-                  <Link
-                    href={`https://foldex.space/claim?claim_guest_id=${guestId}`}
-                    target="_blank"
-                    className="cursor-pointer"
-                  >
-                    <span>Join Foldex</span>
-                  </Link>
-                </Button>
-                <Button
-                  size="sm"
-                  className={cn(isScrolled ? "lg:inline-flex" : "hidden")}
-                >
-                  <Link
-                    href={`https://foldex.space/claim?claim_guest_id=${guestId}`}
-                    target="_blank"
-                    className="cursor-pointer"
-                  >
-                    <span>Join Foldex</span>
-                  </Link>
-                </Button>
+              <div className="flex w-full flex-col space-y-3 sm:flex-row sm:gap-3 sm:space-y-0 md:w-fit items-center">
+                {/* Loading state */}
+                {!isLoaded && (
+                  <div className="h-8 w-8 rounded-full bg-muted animate-pulse" />
+                )}
+
+                {/* Logged in state */}
+                {isLoaded && isSignedIn && (
+                  <>
+                    {/* Theme toggle - only show when scrolled on desktop */}
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={() =>
+                        setTheme(theme === "dark" ? "light" : "dark")
+                      }
+                      className={cn(
+                        isScrolled && "lg:hidden",
+                        "cursor-pointer",
+                      )}
+                    >
+                      <Sun className="h-4 w-4 rotate-0 scale-100 transition-all dark:-rotate-90 dark:scale-0" />
+                      <Moon className="absolute h-4 w-4 rotate-90 scale-0 transition-all dark:rotate-0 dark:scale-100" />
+                      <span className="sr-only">Toggle theme</span>
+                    </Button>
+                    <Button size="sm" className={cn("cursor-pointer")}>
+                      <Link href="/videovault">
+                        <span>Video Vault</span>
+                      </Link>
+                    </Button>
+
+                    <ProfileDropdown />
+                  </>
+                )}
+
+                {/* Logged out state */}
+                {isLoaded && !isSignedIn && (
+                  <>
+                    {/* Theme Toggle */}
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={() =>
+                        setTheme(theme === "dark" ? "light" : "dark")
+                      }
+                      className={cn(
+                        isScrolled && "lg:hidden",
+                        "cursor-pointer",
+                      )}
+                    >
+                      <Sun className="h-4 w-4 rotate-0 scale-100 transition-all dark:-rotate-90 dark:scale-0" />
+                      <Moon className="absolute h-4 w-4 rotate-90 scale-0 transition-all dark:rotate-0 dark:scale-100" />
+                      <span className="sr-only">Toggle theme</span>
+                    </Button>
+                    <Button
+                      size="sm"
+                      className={cn(
+                        isScrolled && "lg:hidden",
+                        "cursor-pointer",
+                      )}
+                    >
+                      <Link href="/videovault">
+                        <span>Video Vault</span>
+                      </Link>
+                    </Button>
+
+                    {/* Sign Up Button - Normal state */}
+                    <AuthDialog>
+                      <Button
+                        size="sm"
+                        className={cn(isScrolled && "lg:hidden")}
+                      >
+                        <span>Sign Up</span>
+                      </Button>
+                    </AuthDialog>
+
+                    {/* Sign Up Button - Scrolled state */}
+                    <AuthDialog>
+                      <Button
+                        size="sm"
+                        className={cn(isScrolled ? "lg:inline-flex" : "hidden")}
+                      >
+                        <span>Sign Up</span>
+                      </Button>
+                    </AuthDialog>
+                  </>
+                )}
               </div>
             </div>
           </div>

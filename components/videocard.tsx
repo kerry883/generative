@@ -1,7 +1,7 @@
 "use client";
 import { Id } from "@/convex/_generated/dataModel";
 import Image from "next/image";
-import { useAction, useMutation, useQuery } from "convex/react";
+import { useMutation, useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { Skeleton } from "./ui/skeleton";
 import { cn } from "@/lib/utils";
@@ -9,10 +9,11 @@ import { useState } from "react";
 import {
   AlertCircle,
   Globe,
-  MoreHorizontal,
+  Lock,
   MoreVertical,
   Play,
   RefreshCw,
+  Sparkles,
   Trash2,
   X,
 } from "lucide-react";
@@ -22,18 +23,26 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuLabel,
   DropdownMenuTrigger,
 } from "./ui/dropdown-menu";
 import { formatRelativeTime } from "@/lib/dateformater";
+import { Avatar, AvatarFallback, AvatarImage } from "./ui/avatar";
 
 interface VideocardProps {
   videoId: Id<"videos">;
   onClick: () => void;
   allowed: boolean;
+  isLocked?: boolean;
+  isFreeToday?: boolean;
 }
 
-const Videocard = ({ videoId, onClick, allowed }: VideocardProps) => {
+const Videocard = ({
+  videoId,
+  onClick,
+  allowed,
+  isLocked = false,
+  isFreeToday = false,
+}: VideocardProps) => {
   const video = useQuery(api.videos.getvideobyId, { videoId: videoId });
   const [isImageLoaded, setIsImageLoaded] = useState(false);
   const deletevideo = useMutation(api.videos.deletevideo);
@@ -55,6 +64,7 @@ const Videocard = ({ videoId, onClick, allowed }: VideocardProps) => {
       </div>
     );
   }
+
   const handleRetry = async () => {
     if (!video.prompt) {
       toast.error("Failed to retry video generation");
@@ -81,6 +91,28 @@ const Videocard = ({ videoId, onClick, allowed }: VideocardProps) => {
     await deletevideo({ videoId });
     toast.success("Video deleted successfully");
   };
+
+  const handleClick = () => {
+    if (isLocked) {
+      toast.error("This video is locked", {
+        description: "Upgrade to Pro to access all videos",
+      });
+      return;
+    }
+    onClick();
+  };
+
+  // Get creator initials
+  const getInitials = (name?: string) => {
+    if (!name) return "U";
+    return name
+      .split(" ")
+      .map((n) => n[0])
+      .join("")
+      .toUpperCase()
+      .slice(0, 2);
+  };
+
   if (video.status === "failed") {
     return (
       <div className="bg-card text-card-foreground  shadow-sm h-full overflow-hidden border-2 border-destructive/50 p-2">
@@ -146,7 +178,7 @@ const Videocard = ({ videoId, onClick, allowed }: VideocardProps) => {
   if (video.status === "generating") {
     return (
       <div
-        className="bg-card text-card-foreground shadow-sm h-full overflow-hidden  p-2"
+        className="bg-card text-card-foreground shadow-sm h-full overflow-hidden cursor-pointer  p-2"
         onClick={onClick}
       >
         {/* Thumbnail Area with Animation */}
@@ -183,20 +215,14 @@ const Videocard = ({ videoId, onClick, allowed }: VideocardProps) => {
       </div>
     );
   }
-  // Format the creation time
-  const formattedDate = new Date(video._creationTime).toLocaleDateString(
-    "en-GB",
-    {
-      day: "2-digit",
-      month: "2-digit",
-      year: "numeric",
-    },
-  );
 
   return (
     <div
-      onClick={onClick}
-      className="bg-card text-card-foreground  shadow-sm cursor-pointer group h-full p-2"
+      onClick={handleClick}
+      className={cn(
+        "bg-card text-card-foreground shadow-sm cursor-pointer group h-full p-2",
+        isLocked && "cursor-not-allowed",
+      )}
     >
       {/* Thumbnail Container */}
       <div className="relative aspect-video w-full overflow-hidden bg-muted ">
@@ -213,6 +239,7 @@ const Videocard = ({ videoId, onClick, allowed }: VideocardProps) => {
             className={cn(
               "object-cover transition-transform duration-300 group-hover:scale-105",
               !isImageLoaded && "opacity-0",
+              isLocked && "group-hover:scale-100",
             )}
             onLoad={() => setIsImageLoaded(true)}
           />
@@ -222,21 +249,70 @@ const Videocard = ({ videoId, onClick, allowed }: VideocardProps) => {
           </div>
         )}
 
-        {/* Play Button Overlay - Shows on Hover */}
-        <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex items-center justify-center">
-          <div className="bg-primary p-4 transform scale-90 group-hover:scale-100 transition-transform duration-300 shadow-lg">
-            <Play className="w-6 h-6 text-white fill-white" />
+        {/* Locked Overlay */}
+        {isLocked && (
+          <div className="absolute inset-0 bg-black/70 flex flex-col items-center justify-center gap-2 z-10">
+            <div className="w-12 h-12 bg-white/10 backdrop-blur-sm flex items-center justify-center">
+              <Lock className="w-6 h-6 text-white" />
+            </div>
+            <span className="text-white text-sm font-medium">
+              Upgrade to watch
+            </span>
           </div>
-        </div>
+        )}
+
+        {/* Free Today Badge */}
+        {isFreeToday && !isLocked && (
+          <div className="absolute top-2 left-2 z-10">
+            <div className="flex items-center gap-1 px-2 py-1 bg-gradient-to-r from-amber-500 to-orange-500 text-white text-xs font-semibold shadow-lg">
+              <Sparkles className="w-3 h-3" />
+              FREE TODAY
+            </div>
+          </div>
+        )}
+
+        {/* Play Button Overlay - Shows on Hover (only for unlocked) */}
+        {!isLocked && (
+          <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex items-center justify-center">
+            <div className="bg-primary p-4 transform scale-90 group-hover:scale-100 transition-transform duration-300 shadow-lg">
+              <Play className="w-6 h-6 text-white fill-white" />
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Text Content */}
-      <div className="p-4 space-y-1.5">
+      <div className="p-4 space-y-2">
+        {/* Title */}
         <div className="flex items-center justify-between">
-          <h3 className="font-semibold tracking-tight truncate leading-tight line-clamp-2 text-card-foreground">
+          <h3
+            className={cn(
+              "font-semibold tracking-tight truncate leading-tight line-clamp-2 text-card-foreground",
+              isLocked && "text-muted-foreground",
+            )}
+          >
             {video.title || "Untitled Video"}
           </h3>
         </div>
+
+        {/* Creator Info */}
+        {(video.creatorname || video.creatorprofile) && (
+          <div className="flex items-center gap-2">
+            <Avatar className="h-6 w-6">
+              <AvatarImage
+                src={video.creatorprofile}
+                alt={video.creatorname || "Creator"}
+              />
+              <AvatarFallback className="text-xs">
+                {getInitials(video.creatorname)}
+              </AvatarFallback>
+            </Avatar>
+            <span className="text-xs text-muted-foreground truncate">
+              {video.creatorname || "Anonymous"}
+            </span>
+          </div>
+        )}
+        {/* Date */}
         <p className="text-sm text-muted-foreground">
           {formatRelativeTime(video._creationTime)}
         </p>
