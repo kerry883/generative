@@ -170,14 +170,13 @@ export function AccountModal({ isOpen, onOpenChange }: AccountModalProps) {
 
   return (
     <Dialog open={isOpen} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-4xl">
+      <DialogContent className="">
         <DialogTitle className="sr-only">Settings</DialogTitle>
         <DialogDescription className="sr-only">
           Manage your account settings
         </DialogDescription>
 
-        <SidebarProvider className="items-start h-full">
-          {/* LEFT SIDEBAR */}
+        {/* <SidebarProvider className="items-start h-full">
           <Sidebar
             collapsible="none"
             className="hidden md:flex w-60 border-r bg-muted/30"
@@ -201,7 +200,7 @@ export function AccountModal({ isOpen, onOpenChange }: AccountModalProps) {
                 </SidebarGroupContent>
               </SidebarGroup>
             </SidebarContent>
-          </Sidebar>
+          </Sidebar> */}
 
           {/* RIGHT MAIN CONTENT */}
           <main className="flex h-[500px] flex-1 flex-col overflow-hidden bg-background">
@@ -383,7 +382,6 @@ export function AccountModal({ isOpen, onOpenChange }: AccountModalProps) {
               </div>
             )}
           </main>
-        </SidebarProvider>
       </DialogContent>
     </Dialog>
   );

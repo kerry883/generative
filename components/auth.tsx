@@ -180,7 +180,7 @@ export function AuthDialog({ children }: { children: React.ReactNode }) {
         className="cursor-pointer"
         render={children as React.ReactElement}
       />
-      <DialogContent className="max-w-4xl p-0 overflow-hidden">
+      <DialogContent className="">
         <div className="p-6 space-y-6 bg-background">
           {/* Header */}
           <div className="space-y-2 text-center">

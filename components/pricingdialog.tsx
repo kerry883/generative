@@ -84,7 +84,7 @@ const SubscriptionDialog = ({
 
   return (
     <Dialog open={isOpen} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-4xl">
+      <DialogContent className="">
         <DialogTitle>
           <p className="text-2xl text-center pt-4">
             Upgrade Your Learning Experience
