@@ -358,10 +358,7 @@ export function VideoPlayer({
             <button
               onClick={handleDownload}
               className={cn(
-                "p-1.5 rounded-md cursor-pointer transition-all relative",
-                canDownloadAllowed
-                  ? "text-white/70 hover:text-white hover:bg-white/10"
-                  : "text-white/40 hover:text-white/60",
+                "p-1.5 rounded-md cursor-pointer transition-all relative text-white",
               )}
               title={
                 canDownloadAllowed
@@ -369,7 +366,7 @@ export function VideoPlayer({
                   : "Pro feature - Upgrade to download"
               }
             >
-              <Download className="w-4 h-4" />
+              <Download className="w-4 h-4 " />
               {!canDownloadAllowed && (
                 <Lock className="w-2 h-2 absolute -top-0.5 -right-0.5 text-amber-400" />
               )}

@@ -6,6 +6,7 @@ import { ThemeProvider } from "@/providers/themeprovider";
 import { Toaster } from "sonner";
 import { GlobalVideoListener } from "@/components/globallistener";
 import { ClerkProvider } from "@clerk/nextjs";
+import { Analytics } from "@vercel/analytics/next";
 
 const jetbrainsMono = JetBrains_Mono({
   subsets: ["latin"],
@@ -50,6 +51,7 @@ export default function RootLayout({
               {children}
               <Toaster />
               <GlobalVideoListener />
+              <Analytics />
             </ThemeProvider>
           </body>
         </html>

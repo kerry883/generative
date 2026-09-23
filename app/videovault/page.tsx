@@ -120,7 +120,7 @@ const WatchList = () => {
         </div>
 
         {/* Upgrade Banner for non-Pro users */}
-        {hasLockedVideos && (
+        {/* {hasLockedVideos && (
           <div className="mb-6 p-4 bg-gradient-to-r from-amber-500/10 to-orange-500/10 border border-amber-500/20">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-3">
@@ -153,7 +153,7 @@ const WatchList = () => {
         )}
 
         {/* Free Today Section */}
-        {freeVideos.filter((v) => v.isFreeToday).length > 0 && (
+        {/* {freeVideos.filter((v) => v.isFreeToday).length > 0 && (
           <div className="mb-8">
             <div className="flex items-center gap-2 mb-4">
               <Sparkles className="h-5 w-5 text-amber-500" />
@@ -171,13 +171,13 @@ const WatchList = () => {
                     videoId={video._id}
                     onClick={() => router.push(`/watch/${video._id}`)}
                     allowed={false}
-                    isLocked={false}
-                    isFreeToday={true}
+                    // isLocked={false}
+                    // isFreeToday={true}
                   />
                 ))}
             </div>
           </div>
-        )}
+        )} */}
 
         {/* Search Bar */}
         <div className="mb-6">
@@ -240,13 +240,14 @@ const WatchList = () => {
                     key={video._id}
                     videoId={video._id}
                     onClick={() => {
-                      if (!video.isLocked) {
-                        router.push(`/watch/${video._id}`);
-                      }
+                      // if (!video.isLocked) {
+                      //   router.push(`/watch/${video._id}`);
+                      // }
+                      router.push(`/watch/${video._id}`);
                     }}
                     allowed={false}
-                    isLocked={video.isLocked}
-                    isFreeToday={video.isFreeToday}
+                    // isLocked={video.isLocked}
+                    // isFreeToday={video.isFreeToday}
                   />
                 ))}
               </div>

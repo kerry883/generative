@@ -7,7 +7,7 @@ const isPublicRoute = createRouteMatcher([
   '/api/pricing',     // Regional pricing API
   '/api/download',    // Video download proxy
   '/api/generate',    // Video generation proxy
-  '/videovault/(.*)', // Video vault pages
+  '/videovault(.*)', // Video vault pages
 ])
 
 export default clerkMiddleware(async (auth, req) => {

@@ -39,7 +39,7 @@ export default function CallToAction() {
                 className="h-12 px-10 text-base transition-transform hover:scale-105 cursor-pointer "
               >
                 <Link
-                  href={`https://foldex.space/claim?claim_guest_id=${guestId}`}
+                  href={`https://foldex.space`}
                   className="flex items-center gap-2"
                   target="_blank"
                 >

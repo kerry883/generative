@@ -78,7 +78,6 @@ const SubscriptionDialog = ({
   const features = [
     "Unlimited Video Generation",
     "Video download",
-    "Full access to video vault",
     "Includes full access to Foldex(The All-in-One Study App).",
     "Priority support",
   ];
