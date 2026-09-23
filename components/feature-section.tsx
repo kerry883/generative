@@ -1,4 +1,3 @@
-//@ts-nocheck
 "use client";
 import {
   Accordion,
@@ -75,11 +74,11 @@ export default function Features() {
         <div className="mx-auto max-w-7xl grid gap-8 md:grid-cols-[1fr_2fr] lg:gap-12 items-start">
           {/* Accordion - 30% */}
           <Accordion
-            type="single"
-            value={activeItem}
+            defaultValue={["item-1"]}
+            value={activeItem as any}
             onValueChange={(value) => {
               if (value) {
-                setActiveItem(value as FeatureKey);
+                setActiveItem(value as unknown as FeatureKey);
               }
             }}
             className="w-full"
@@ -162,8 +161,13 @@ export default function Features() {
                 >
                   <video
                     ref={videoRef}
-                    src={featureMedia[activeItem].video}
-                    poster={featureMedia[activeItem].poster}
+                    src={
+                      featureMedia[activeItem]?.video ||
+                      "https://videos.foldex.space/creatingfolder1.mp4"
+                    }
+                    poster={
+                      featureMedia[activeItem]?.poster || "/createfolder.png"
+                    }
                     className="size-full object-cover"
                     playsInline
                     muted

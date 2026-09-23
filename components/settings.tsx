@@ -218,7 +218,7 @@ export function AccountModal({ isOpen, onOpenChange }: AccountModalProps) {
                   {activeSection === "profile" && (
                     <div className="space-y-6 max-w-xl">
                       <div className="flex items-center gap-6">
-                        <Avatar className="h-20 w-20 ">
+                        <Avatar className="h-30 w-20 ">
                           <AvatarImage
                             src={imagePreview || user?.imageUrl}
                             className="rounded-none  h-30 w-20 "
