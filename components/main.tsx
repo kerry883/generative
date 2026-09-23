@@ -69,6 +69,7 @@ const Main = () => {
     }
 
     setisGenerating(true);
+    setPrompt("");
     try {
       const formdata = new FormData();
       formdata.append("prompt", prompt);
@@ -127,7 +128,7 @@ const Main = () => {
       toast.error("Please wait, initializing...");
       return;
     }
-
+    setPrompt("");
     setisGenerating(true);
     try {
       const formdata = new FormData();

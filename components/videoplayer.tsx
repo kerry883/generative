@@ -1,7 +1,6 @@
-//@ts-nocheck
 "use client";
 
-import React, { useState, useRef, useEffect } from "react";
+import React, { useState, useRef, useEffect, useCallback } from "react";
 import { Slider } from "@/components/ui/slider";
 import {
   Play,
@@ -16,7 +15,6 @@ import {
   Lock,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { Button } from "@/components/ui/button";
 import { useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { toast } from "sonner";
@@ -38,6 +36,7 @@ export function VideoPlayer({
 }: VideoPlayerProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const hideControlsTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   // State
   const [isPlaying, setIsPlaying] = useState(false);
@@ -46,7 +45,7 @@ export function VideoPlayer({
   const [volume, setVolume] = useState(1);
   const [isMuted, setIsMuted] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
-  const [isHovering, setIsHovering] = useState(false);
+  const [showControls, setShowControls] = useState(true);
   const [isLoading, setIsLoading] = useState(true);
   const [showSubtitles, setShowSubtitles] = useState(false);
   const [currentSubtitle, setCurrentSubtitle] = useState("");
@@ -55,23 +54,35 @@ export function VideoPlayer({
 
   // Format time (e.g., 65s -> 1:05)
   const formatTime = (time: number) => {
+    if (!isFinite(time) || isNaN(time)) return "0:00";
     const minutes = Math.floor(time / 60);
     const seconds = Math.floor(time % 60);
     return `${minutes}:${seconds < 10 ? "0" : ""}${seconds}`;
   };
 
-  // Simple subtitle generation from transcript
-  // This splits transcript into chunks and estimates timing
-  const generateSubtitles = (transcript: string, duration: number) => {
-    if (!transcript || !duration) return [];
+  // Show controls and reset hide timeout
+  const showControlsTemporarily = useCallback(() => {
+    setShowControls(true);
+    if (hideControlsTimeoutRef.current) {
+      clearTimeout(hideControlsTimeoutRef.current);
+    }
+    if (isPlaying) {
+      hideControlsTimeoutRef.current = setTimeout(() => {
+        setShowControls(false);
+      }, 3000);
+    }
+  }, [isPlaying]);
 
-    // Split by sentences or periods
+  // Simple subtitle generation from transcript
+  const generateSubtitles = (transcript: string, dur: number) => {
+    if (!transcript || !dur || !isFinite(dur)) return [];
+
     const sentences = transcript
       .split(/[.!?]+/)
       .filter((s) => s.trim().length > 0)
       .map((s) => s.trim());
 
-    const timePerSentence = duration / sentences.length;
+    const timePerSentence = dur / sentences.length;
 
     return sentences.map((text, index) => ({
       start: index * timePerSentence,
@@ -82,7 +93,7 @@ export function VideoPlayer({
 
   // Update current subtitle based on video time
   useEffect(() => {
-    if (!showSubtitles || !transcript || !duration) {
+    if (!showSubtitles || !transcript || !duration || !isFinite(duration)) {
       setCurrentSubtitle("");
       return;
     }
@@ -97,7 +108,7 @@ export function VideoPlayer({
 
   // --- Handlers ---
 
-  const togglePlay = () => {
+  const togglePlay = useCallback(() => {
     if (!videoRef.current) return;
     if (isPlaying) {
       videoRef.current.pause();
@@ -105,31 +116,35 @@ export function VideoPlayer({
       videoRef.current.play();
     }
     setIsPlaying(!isPlaying);
-  };
+    showControlsTemporarily();
+  }, [isPlaying, showControlsTemporarily]);
 
   const handleTimeUpdate = () => {
-    if (videoRef.current) {
+    if (videoRef.current && isFinite(videoRef.current.currentTime)) {
       setCurrentTime(videoRef.current.currentTime);
     }
   };
 
   const handleLoadedMetadata = () => {
-    if (videoRef.current) {
+    if (videoRef.current && isFinite(videoRef.current.duration)) {
       setDuration(videoRef.current.duration);
       setIsLoading(false);
     }
   };
 
-  const handleSeek = (value: number[]) => {
-    if (videoRef.current) {
-      videoRef.current.currentTime = value[0];
-      setCurrentTime(value[0]);
+  const handleSeek = (value: number | readonly number[]) => {
+    if (!videoRef.current) return;
+    const seekTime = Array.isArray(value) ? value[0] : value;
+    if (typeof seekTime === "number" && isFinite(seekTime)) {
+      videoRef.current.currentTime = seekTime;
+      setCurrentTime(seekTime);
     }
   };
 
-  const handleVolumeChange = (value: number[]) => {
-    const newVolume = value[0];
-    if (videoRef.current) {
+  const handleVolumeChange = (value: number | readonly number[]) => {
+    if (!videoRef.current) return;
+    const newVolume = Array.isArray(value) ? value[0] : value;
+    if (typeof newVolume === "number" && isFinite(newVolume)) {
       videoRef.current.volume = newVolume;
       setVolume(newVolume);
       setIsMuted(newVolume === 0);
@@ -182,6 +197,22 @@ export function VideoPlayer({
     }
   };
 
+  // Handle mouse move to show controls
+  const handleMouseMove = () => {
+    showControlsTemporarily();
+  };
+
+  const handleMouseLeave = () => {
+    if (isPlaying) {
+      if (hideControlsTimeoutRef.current) {
+        clearTimeout(hideControlsTimeoutRef.current);
+      }
+      hideControlsTimeoutRef.current = setTimeout(() => {
+        setShowControls(false);
+      }, 1000);
+    }
+  };
+
   // Block Ctrl+S save shortcut
   useEffect(() => {
     const handleSaveShortcut = (e: KeyboardEvent) => {
@@ -216,17 +247,30 @@ export function VideoPlayer({
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [isPlaying]);
+  }, [togglePlay]);
+
+  // Cleanup timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (hideControlsTimeoutRef.current) {
+        clearTimeout(hideControlsTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  // Calculate safe slider max value
+  const sliderMax = isFinite(duration) && duration > 0 ? duration : 100;
+  const sliderValue = isFinite(currentTime) ? currentTime : 0;
 
   return (
     <div
       ref={containerRef}
       className={cn(
-        "relative group  overflow-hidden bg-black aspect-video shadow-lg border border-border/50 focus:outline-none focus:ring-2 focus:ring-primary/50",
+        "relative group overflow-hidden bg-black aspect-video shadow-lg border border-border/50 focus:outline-none focus:ring-2 focus:ring-primary/50",
         className,
       )}
-      onMouseEnter={() => setIsHovering(true)}
-      onMouseLeave={() => setIsHovering(false)}
+      onMouseMove={handleMouseMove}
+      onMouseLeave={handleMouseLeave}
       tabIndex={0}
     >
       {/* 1. The Video Element */}
@@ -239,7 +283,12 @@ export function VideoPlayer({
         onLoadedMetadata={handleLoadedMetadata}
         onWaiting={() => setIsLoading(true)}
         onCanPlay={() => setIsLoading(false)}
-        onEnded={() => setIsPlaying(false)}
+        onEnded={() => {
+          setIsPlaying(false);
+          setShowControls(true);
+        }}
+        onPlay={() => setIsPlaying(true)}
+        onPause={() => setIsPlaying(false)}
         onClick={togglePlay}
         onContextMenu={handleContextMenu}
         controlsList="nodownload"
@@ -258,7 +307,7 @@ export function VideoPlayer({
           className="absolute inset-0 flex items-center justify-center cursor-pointer"
           onClick={togglePlay}
         >
-          <div className="w-16 h-16  bg-primary backdrop-blur-md flex items-center justify-center hover:bg-white/30 transition-all hover:scale-110 group/play">
+          <div className="w-16 h-16 bg-primary backdrop-blur-md flex items-center justify-center hover:bg-white/30 transition-all hover:scale-110">
             <Play className="w-8 h-8 text-white fill-white ml-1" />
           </div>
         </div>
@@ -279,14 +328,14 @@ export function VideoPlayer({
       <div
         className={cn(
           "absolute bottom-0 left-0 right-0 p-4 bg-gradient-to-t from-black/80 via-black/40 to-transparent transition-opacity duration-300",
-          isPlaying && !isHovering ? "opacity-0" : "opacity-100",
+          showControls ? "opacity-100" : "opacity-0 pointer-events-none",
         )}
       >
         {/* Progress Bar */}
-        <div className="mb-4 group/slider">
+        <div className="mb-4">
           <Slider
-            value={[currentTime]}
-            max={duration}
+            value={[sliderValue]}
+            max={sliderMax}
             step={0.1}
             onValueChange={handleSeek}
             className="w-full cursor-pointer"
@@ -357,16 +406,14 @@ export function VideoPlayer({
             {/* Download */}
             <button
               onClick={handleDownload}
-              className={cn(
-                "p-1.5 rounded-md cursor-pointer transition-all relative text-white",
-              )}
+              className="p-1.5 rounded-md cursor-pointer transition-all relative text-white"
               title={
                 canDownloadAllowed
                   ? "Download Video"
                   : "Pro feature - Upgrade to download"
               }
             >
-              <Download className="w-4 h-4 " />
+              <Download className="w-4 h-4" />
               {!canDownloadAllowed && (
                 <Lock className="w-2 h-2 absolute -top-0.5 -right-0.5 text-amber-400" />
               )}
