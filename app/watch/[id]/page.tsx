@@ -1,6 +1,6 @@
 "use client";
 
-import React from "react";
+import { useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useMutation, useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
@@ -13,6 +13,9 @@ import {
   FileText,
   VideoOff,
   Sparkles,
+  ThumbsDown,
+  ThumbsUp,
+  X
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -35,26 +38,27 @@ interface SidebarVideoItemProps {
     thumbnail?: string;
     status: "generating" | "ready" | "failed";
     _creationTime: number;
+    creatorname?: string;
+    creatorprofile?: string;
   };
   onClick: () => void;
 }
 
+// 2. The YouTube-style dense video item
 const SidebarVideoItem = ({ video, onClick }: SidebarVideoItemProps) => {
   return (
-    <div onClick={onClick} className="flex gap-3 cursor-pointer group">
+    <div onClick={onClick} className="flex gap-3 cursor-pointer group p-2  hover:bg-muted transition-colors">
       {/* Thumbnail */}
-      <div className="relative w-40 aspect-video bg-muted overflow-hidden flex-shrink-0">
+      <div className="relative w-36 aspect-video bg-muted  overflow-hidden flex-shrink-0 border border-border/50">
         {video.status === "generating" ? (
-          // Generating state thumbnail
           <div className="w-full h-full flex items-center justify-center bg-muted">
             <div className="relative">
-              <div className="w-8 h-8 border-2 border-muted-foreground/20 border-t-primary rounded-full animate-spin" />
+              <div className="w-6 h-6 border-2 border-muted-foreground/20 border-t-primary rounded-full animate-spin" />
             </div>
           </div>
         ) : video.status === "failed" ? (
-          // Failed state thumbnail
           <div className="w-full h-full flex items-center justify-center bg-destructive/10">
-            <AlertCircle className="w-6 h-6 text-destructive" />
+            <AlertCircle className="w-5 h-5 text-destructive" />
           </div>
         ) : video.thumbnail ? (
           <Image
@@ -65,36 +69,48 @@ const SidebarVideoItem = ({ video, onClick }: SidebarVideoItemProps) => {
           />
         ) : (
           <div className="w-full h-full flex items-center justify-center bg-muted">
-            <span className="text-xs text-muted-foreground">No thumbnail</span>
+            <span className="text-[10px] text-muted-foreground">No thumbnail</span>
           </div>
         )}
       </div>
 
-      {/* Video Info */}
-      <div className="flex-1 min-w-0">
-        <h3 className="font-medium text-sm line-clamp-2 text-foreground group-hover:text-primary transition-colors">
+      {/* Video Info & Creator */}
+      <div className="flex-1 min-w-0 py-0.5 flex flex-col">
+        <h3 className="font-medium text-sm line-clamp-2 text-foreground group-hover:text-primary transition-colors leading-snug">
           {video.title || "Untitled Video"}
         </h3>
-        <p className="text-xs text-muted-foreground mt-1">
-          {formatRelativeTime(video._creationTime)}
-        </p>
-        {video.status === "generating" && (
-          <span className="inline-flex items-center gap-1 text-xs text-primary mt-1">
-            <span className="relative flex h-2 w-2">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75"></span>
-              <span className="relative inline-flex rounded-full h-2 w-2 bg-primary"></span>
-            </span>
-            Generating...
-          </span>
-        )}
-        {video.status === "failed" && (
-          <span className="text-xs text-destructive mt-1">Failed</span>
-        )}
+
+        <div className="mt-auto pt-2 space-y-1">
+          {/* Creator Profile Pic & Name */}
+          <div className="flex items-center gap-1.5">
+            <Avatar className="h-4 w-4 ">
+              <AvatarImage src={video.creatorprofile} className="rounded-none" />
+              <AvatarFallback className="text-[8px] bg-primary/10 text-primary">
+                {video.creatorname?.charAt(0)?.toUpperCase() || "U"}
+              </AvatarFallback>
+            </Avatar>
+            <p className="text-xs text-muted-foreground truncate font-medium">
+              {video.creatorname || "Anonymous"}
+            </p>
+          </div>
+
+          {/* Timestamp & Status Flags */}
+          <div className="flex items-center justify-between">
+            <p className="text-[11px] text-muted-foreground/80">
+              {formatRelativeTime(video._creationTime)}
+            </p>
+            {video.status === "generating" && (
+              <span className="text-[10px] text-primary animate-pulse font-medium">Generating...</span>
+            )}
+            {video.status === "failed" && (
+              <span className="text-[10px] text-destructive font-medium">Failed</span>
+            )}
+          </div>
+        </div>
       </div>
     </div>
   );
 };
-
 // Sidebar skeleton loader
 const SidebarSkeleton = () => (
   <div className="space-y-4">
@@ -110,21 +126,31 @@ const SidebarSkeleton = () => (
     ))}
   </div>
 );
-
+const DISLIKE_TAGS = [
+  { id: 'text_overlapped', label: 'Text overlapped / cut off' },
+  { id: 'pacing_issue', label: 'Animations too fast/slow' },
+  { id: 'boring_visuals', label: 'Visuals were unhelpful' },
+  { id: 'hallucination', label: 'Math/Code error' },
+];
 export default function WatchPage() {
   const params = useParams();
   const router = useRouter();
   const videoId = params.id as Id<"videos">;
   const { guestId } = useGuestIdentity();
   const { isSignedIn, user } = useUser();
-
+  const [retrying, setretrying] = useState(false)
   // Fetch video with guestId for permission check
   const video = useQuery(api.videos.getvideobyId, {
     videoId: videoId,
   });
   const retry = useMutation(api.videos.retryvideo);
-
+  const submitFeedback = useMutation(api.videos.submitFeedback);
+  const [userVote, setUserVote] = useState<'like' | 'dislike' | null>(null);
+  const [showDislikeMenu, setShowDislikeMenu] = useState(false);
+  const [selectedTags, setSelectedTags] = useState<string[]>([]);
+  const [copied, setCopied] = useState(false);
   const handleRetry = async () => {
+    setretrying(true);
     if (!video?.prompt) {
       toast.error("Failed to retry video generation");
       return;
@@ -134,9 +160,54 @@ export default function WatchPage() {
       toast.success("Video generation started");
     } catch (error) {
       toast.error("Failed to retry video generation");
+    } finally {
+      setretrying(false)
+    }
+  };
+  const handleLike = async () => {
+    const newVote = userVote === 'like' ? null : 'like';
+    setUserVote(newVote);
+    setShowDislikeMenu(false);
+
+    try {
+      await submitFeedback({ videoId, type: 'like' });
+    } catch (error) {
+      console.error("Failed to submit like:", error);
+      setUserVote(userVote); // Rollback on error
     }
   };
 
+  const handleDislikeClick = async () => {
+    if (userVote === 'dislike') {
+      // Toggle off
+      setUserVote(null);
+      setShowDislikeMenu(false);
+      await submitFeedback({ videoId, type: 'dislike' });
+    } else {
+      // Open the tag menu, but register the generic dislike immediately
+      setUserVote('dislike');
+      setShowDislikeMenu(true);
+      setSelectedTags([]);
+      await submitFeedback({ videoId, type: 'dislike' });
+    }
+  };
+
+  const toggleTag = (tagId: string) => {
+    setSelectedTags((prev) =>
+      prev.includes(tagId) ? prev.filter(t => t !== tagId) : [...prev, tagId]
+    );
+  };
+
+  const submitDislikeTags = async () => {
+    setShowDislikeMenu(false);
+    if (selectedTags.length > 0) {
+      await submitFeedback({
+        videoId,
+        type: 'dislike',
+        tags: selectedTags
+      });
+    }
+  };
   // Fetch videos for sidebar based on auth state
   // Logged-in users: fetch their videos
   // Guests: fetch guest videos
@@ -163,8 +234,8 @@ export default function WatchPage() {
   // Showcase only for guests
   const showcaseVideos = !isSignedIn
     ? publicVideos
-        ?.filter((v) => v._id !== videoId && v.guestId !== guestId)
-        ?.slice(0, 3)
+      ?.filter((v) => v._id !== videoId && v.guestId !== guestId)
+      ?.slice(0, 3)
     : [];
 
   // --- SHARED CONTAINER STYLE ---
@@ -173,69 +244,74 @@ export default function WatchPage() {
 
   // Sidebar component (reusable across states)
   const Sidebar = () => (
-    <div className="w-full lg:w-80 xl:w-96 space-y-6">
-      {/* Your Videos Section */}
-      <div className="space-y-3">
-        <h3 className="font-semibold text-sm text-muted-foreground uppercase tracking-wide">
-          Your Videos
-        </h3>
+    <div className="w-full lg:w-80 xl:w-96 lg:sticky lg:top-4 lg:h-[calc(100vh-100px)] flex flex-col pb-6">
+      <div className="border border-border bg-card/30 flex flex-col h-full overflow-hidden shadow-sm">
 
-        {/* Loading State */}
-        {guestVideos === undefined && userVideos === undefined && (
-          <SidebarSkeleton />
-        )}
-
-        {/* Videos List */}
-        {sidebarVideos && sidebarVideos.length > 0 && (
-          <div className="space-y-3">
-            {sidebarVideos.map((v) => (
-              <SidebarVideoItem
-                key={v._id}
-                video={v}
-                onClick={() => router.push(`/watch/${v._id}`)}
-              />
-            ))}
-          </div>
-        )}
-
-        {/* Empty State */}
-        {sidebarVideos && sidebarVideos.length === 0 && (
-          <div className="text-center py-6 border bg-card">
-            <p className="text-sm text-muted-foreground">No other videos yet</p>
-            <Button
-              variant="outline"
-              size="sm"
-              className="mt-3 cursor-pointer"
-              onClick={() => router.push("/")}
-            >
-              Create another video
-            </Button>
-          </div>
-        )}
-      </div>
-
-      {/* Showcase Section */}
-      {showcaseVideos && showcaseVideos.length > 0 && (
-        <div className="space-y-3">
-          <div className="flex items-center gap-2">
-            <Sparkles className="h-4 w-4 text-primary" />
-            <h3 className="font-semibold text-sm text-muted-foreground uppercase tracking-wide">
-              Showcase
-            </h3>
-          </div>
-          <div className="space-y-3">
-            {showcaseVideos.map((v) => (
-              <SidebarVideoItem
-                key={v._id}
-                video={v}
-                onClick={() => router.push(`/watch/${v._id}`)}
-              />
-            ))}
-          </div>
+        {/* Playlist Header */}
+        <div className="p-4 border-b border-border bg-card/80 backdrop-blur-sm z-10">
+          <h2 className="text-base font-semibold text-foreground flex items-center gap-2">
+            Suggested Videos
+          </h2>
         </div>
-      )}
+
+        {/* Scrollable Playlist Area */}
+        <div className="flex-1 overflow-y-auto p-2 space-y-4 scrollbar-thin">
+          {/* Loading State */}
+          {guestVideos === undefined && userVideos === undefined && (
+            <div className="p-2"><SidebarSkeleton /></div>
+          )}
+
+          {/* Your Videos Section */}
+          {sidebarVideos && sidebarVideos.length > 0 && (
+            <div className="space-y-1">
+              <h3 className="px-2 pt-2 pb-1 text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                Your Videos
+              </h3>
+              {sidebarVideos.map((v) => (
+                <SidebarVideoItem
+                  key={v._id}
+                  video={v}
+                  onClick={() => router.push(`/watch/${v._id}`)}
+                />
+              ))}
+            </div>
+          )}
+
+          {/* Empty State */}
+          {sidebarVideos && sidebarVideos.length === 0 && (
+            <div className="text-center py-6 mx-2 border border-dashed  bg-card/50">
+              <p className="text-sm text-muted-foreground">No other videos yet</p>
+              <Button
+                variant="outline"
+                size="sm"
+                className="mt-3 cursor-pointer"
+                onClick={() => router.push("/")}
+              >
+                Create another video
+              </Button>
+            </div>
+          )}
+
+          {/* Showcase Section */}
+          {showcaseVideos && showcaseVideos.length > 0 && (
+            <div className="space-y-1 pt-2 border-t border-border/50">
+              <h3 className="px-2 pt-2 pb-1 text-xs font-semibold text-muted-foreground uppercase tracking-wide flex items-center gap-1.5">
+                <Sparkles className="h-3 w-3 text-primary" /> Showcase
+              </h3>
+              {showcaseVideos.map((v) => (
+                <SidebarVideoItem
+                  key={v._id}
+                  video={v}
+                  onClick={() => router.push(`/watch/${v._id}`)}
+                />
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   );
+
 
   // --- STATE 0: LOADING (video === undefined) ---
   if (video === undefined) {
@@ -431,6 +507,7 @@ export default function WatchPage() {
                   </p>
 
                   <Button
+                    disabled={retrying}
                     variant="outline"
                     className="mt-4  gap-2"
                     onClick={handleRetry}
@@ -489,33 +566,85 @@ export default function WatchPage() {
               </div>
 
               <Separator />
-
-              {/* Creator Section - YouTube Style */}
-              {(video.creatorname || video.creatorprofile) && (
-                <div className="flex items-center gap-3 py-2">
-                  <Avatar className="h-10 w-10">
-                    <AvatarImage
-                      src={video.creatorprofile}
-                      alt={video.creatorname || "Creator"}
-                      className="rounded-none"
-                    />
-                    <AvatarFallback className="rounded-none">
-                      {video.creatorname
-                        ?.split(" ")
-                        .map((n) => n[0])
-                        .join("")
-                        .toUpperCase()
-                        .slice(0, 2) || "U"}
-                    </AvatarFallback>
-                  </Avatar>
-                  <div>
-                    <p className="font-semibold text-foreground">
-                      {video.creatorname || "Anonymous"}
-                    </p>
+              <div className="flex justify-between items-center">
+                {/* Creator Section - YouTube Style */}
+                {(video.creatorname || video.creatorprofile) && (
+                  <div className="flex items-center gap-3 py-2">
+                    <Avatar className="h-10 w-10">
+                      <AvatarImage
+                        src={video.creatorprofile}
+                        alt={video.creatorname || "Creator"}
+                        className="rounded-none"
+                      />
+                      <AvatarFallback className="rounded-none">
+                        {video.creatorname
+                          ?.split(" ")
+                          .map((n) => n[0])
+                          .join("")
+                          .toUpperCase()
+                          .slice(0, 2) || "U"}
+                      </AvatarFallback>
+                    </Avatar>
+                    <div>
+                      <p className="font-semibold text-foreground">
+                        {video.creatorname || "Anonymous"}
+                      </p>
+                    </div>
                   </div>
-                </div>
-              )}
+                )}
+                <div className="relative">
+                  <div className="flex items-center gap-2 bg-muted/50 p-1  border border-border">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className={`rounded-none px-4 gap-2 ${userVote === 'like' ? 'bg-primary/10 text-primary hover:bg-primary/20 hover:text-primary' : ''}`}
+                      onClick={handleLike}
+                    >
+                      <ThumbsUp className={`h-4 w-4 ${userVote === 'like' ? 'fill-current' : ''}`} />
+                      <span>{video.likes || 0}</span>
+                    </Button>
+                    <Separator orientation="vertical" className="h-6 bg-border" />
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className={` px-4 gap-2 ${userVote === 'dislike' ? 'bg-destructive/10 text-destructive hover:bg-destructive/20 hover:text-destructive' : ''}`}
+                      onClick={handleDislikeClick}
+                    >
+                      <ThumbsDown className={`h-4 w-4 ${userVote === 'dislike' ? 'fill-current' : ''}`} />
+                      <span>{video.dislikes || 0}</span>
+                    </Button>
+                  </div>
 
+                  {/* Dislike Tagging Popover */}
+                  {showDislikeMenu && (
+                    <div className="absolute top-full right-0 mt-2 w-72 bg-popover border border-border  shadow-lg p-4 z-50 animate-in fade-in slide-in-from-top-2">
+                      <div className="flex justify-between items-center mb-3">
+                        <span className="text-sm font-semibold">What went wrong?</span>
+                        <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => setShowDislikeMenu(false)}>
+                          <X className="h-4 w-4" />
+                        </Button>
+                      </div>
+                      <div className="flex flex-wrap gap-2 mb-4">
+                        {DISLIKE_TAGS.map((tag) => (
+                          <button
+                            key={tag.id}
+                            onClick={() => toggleTag(tag.id)}
+                            className={`text-xs px-3 py-1.5  border transition-colors ${selectedTags.includes(tag.id)
+                              ? 'bg-primary text-primary-foreground border-primary'
+                              : 'bg-transparent text-foreground hover:bg-muted border-border'
+                              }`}
+                          >
+                            {tag.label}
+                          </button>
+                        ))}
+                      </div>
+                      <Button className="w-full h-8 text-xs" onClick={submitDislikeTags} disabled={selectedTags.length === 0}>
+                        Submit Feedback
+                      </Button>
+                    </div>
+                  )}
+                </div>
+              </div>
               <Separator />
 
               {/* Description Section */}

@@ -35,9 +35,10 @@ export const schedulevideogeneration = mutation({
       console.log("fingerprint ",args.fingerprint);
       console.log("guestId",args.guestId)
     // Create the video entry first (in "generating" state)
+    const prompt = args.prompt + "\n\n" + args.context;
     const videoId = await ctx.db.insert("videos", {
       status: "generating",
-      prompt: args.prompt, // Store original prompt
+      prompt: prompt, // Store original prompt
       public: false,
       guestId:args.guestId
     });
@@ -69,7 +70,6 @@ export const getguestvideo = query({
 export const claimguestvideo = mutation({
   args:{
     guestId:v.string(),
-    folderId:v.optional(v.id("folders"))
   },
   handler: async (ctx ,args)=>{
     const user = await ctx.auth.getUserIdentity();
@@ -84,28 +84,11 @@ export const claimguestvideo = mutation({
       return { success: false, message: "No videos found for this guest ID" };
     }
     
-    let targetFolderId: Id<"folders">;
-    
-    // If folderId provided, verify it exists and belongs to user
-    if(args.folderId){
-      const folder = await ctx.db.get(args.folderId);
-      if(!folder || folder.userId !== user.subject){
-        throw new Error("Folder not found or access denied");
-      }
-      targetFolderId = args.folderId;
-    } else {
-      // Create "Your Videos" folder for new users
-      const newFolderId = await ctx.runMutation(api.folders.createFolder,{
-        name:"Your Videos",
-      });
-      targetFolderId = newFolderId;
-    }
-    
     // Claim all videos
     for(const video of videos){
       await ctx.db.patch(video._id,{
         userId:user.subject,
-        folderId:targetFolderId,
+        folderId:undefined,
         guestId:undefined,
         creatorname:user.name,
         creatorprofile:user.pictureUrl
@@ -114,7 +97,6 @@ export const claimguestvideo = mutation({
     
     return { 
       success: true, 
-      folderId: targetFolderId, 
       videoCount: videos.length 
     };
   }

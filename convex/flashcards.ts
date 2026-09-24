@@ -53,6 +53,29 @@ export const deleteFlashcard = mutation({
     }
 })
 
+export const deleteFlashcards = mutation({
+    args:{
+        flashcardIds:v.array(v.id("flashcards"))
+    },
+    handler:async (ctx, args)=>{
+        const user = await ctx.auth.getUserIdentity();
+        if(!user){
+            throw new Error("Not authenticated");
+        }
+        for(const flashcardId of args.flashcardIds){
+            const flashcard = await ctx.db.get(flashcardId);
+            if(!flashcard || flashcard.userId !== user.subject){
+                continue; // skip cards that don't exist or aren't owned
+            }
+            const reviews = await ctx.db.query('flashcardReviews').withIndex('by_flashcard',(q)=>q.eq('flashcardId',flashcardId)).collect();
+            await Promise.all(reviews.map((r)=>ctx.db.delete(r._id)));
+            const progress = await ctx.db.query('flashcardProgress').withIndex('by_user_flashcard',(q)=>q.eq('userId',user.subject).eq('flashcardId',flashcardId)).collect();
+            await Promise.all(progress.map((p)=>ctx.db.delete(p._id)));
+            await ctx.db.delete(flashcardId);
+        }
+    }
+})
+
 export const updateFlashcard = mutation({
     args:{
         flashcardId:v.id("flashcards"),

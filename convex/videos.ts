@@ -1,6 +1,8 @@
 import { v } from "convex/values";
 import { action, mutation, query } from "./_generated/server";
 import { api } from "./_generated/api";
+import { generateObject, generateText } from "ai";
+import { google } from "@ai-sdk/google";
 import { z } from "zod";
 import { DatabaseReader } from "./_generated/server";
 import { Doc, Id } from "./_generated/dataModel";
@@ -45,7 +47,8 @@ export const updateVideo = mutation({
       url: v.string(),
       snippet: v.string(),
     }))),
-    public:v.optional(v.boolean()),
+    public: v.optional(v.boolean()),
+    code: v.optional(v.string())
   },
   handler: async (ctx, args) => {
     const video = await ctx.db.get(args.videoId);
@@ -62,6 +65,7 @@ export const updateVideo = mutation({
       transcript: args.transcript,
       sources: args.sources,
       public: args.public,
+      code: args.code
     });
   },
 });
@@ -77,8 +81,8 @@ export const getvideos = query({
 });
 
 export const getpublicvideos = query({
-  handler:async (ctx)=>{
-    const videos = await ctx.db.query('videos').withIndex('by_public',(q)=>q.eq('public',true)).collect();
+  handler: async (ctx) => {
+    const videos = await ctx.db.query('videos').withIndex('by_public', (q) => q.eq('public', true)).collect();
     return videos;
   }
 })
@@ -86,23 +90,23 @@ export const getpublicvideos = query({
 export const getusersvideo = query({
   handler: async (ctx) => {
     const user = await ctx.auth.getUserIdentity();
-    if(!user) return null;
-    const videos = await ctx.db.query("videos").withIndex("by_user",(q)=>q.eq("userId",user.subject)).collect();
+    if (!user) return null;
+    const videos = await ctx.db.query("videos").withIndex("by_user", (q) => q.eq("userId", user.subject)).collect();
     return videos;
   }
 })
 export const makepublic = mutation({
-  args:{
-    videoId:v.id('videos')
+  args: {
+    videoId: v.id('videos')
   },
-  handler:async (ctx ,args)=>{
+  handler: async (ctx, args) => {
     const video = await ctx.db.get(args.videoId);
-    if(!video){
+    if (!video) {
       throw Error('video not found')
     }
     const newStatus = !video.public;
-    await ctx.db.patch(args.videoId,{
-      public:newStatus,
+    await ctx.db.patch(args.videoId, {
+      public: newStatus,
     })
     return newStatus;
   }
@@ -137,69 +141,69 @@ export const deletevideo = mutation({
   },
   handler: async (ctx, args) => {
     const user = await ctx.auth.getUserIdentity();
-    if(!user){
+    if (!user) {
       throw Error('not authenticated')
     }
     const video = await ctx.db.get(args.videoId);
-    if (!video ) {
+    if (!video) {
       throw Error("Video not found");
     }
-    if(video.status === 'failed' || video.templateId){
+    if (video.status === 'failed' || video.templateId) {
       await ctx.db.delete(args.videoId);
     }
-    if(video.status === 'ready'){
-      await ctx.db.patch(args.videoId,{
-        folderId:undefined,
-        public:true
+    if (video.status === 'ready') {
+      await ctx.db.patch(args.videoId, {
+        folderId: undefined,
+        public: true
       })
     }
-    const usage = await ctx.db.query('usageTracking').withIndex('by_user',(q)=>q.eq('userId',user.subject)).first();
-    if(!usage || !usage.totalVideosGenerated) return null;
-    if(usage.totalVideosGenerated > 0){
+    const usage = await ctx.db.query('usageTracking').withIndex('by_user', (q) => q.eq('userId', user.subject)).first();
+    if (!usage || !usage.totalVideosGenerated) return null;
+    if (usage.totalVideosGenerated > 0) {
       const newCount = Math.max(0, usage.totalVideosGenerated - 1);
-      await ctx.db.patch(usage._id,{
-        totalVideosGenerated:newCount,
-        updatedAt:Date.now(),
+      await ctx.db.patch(usage._id, {
+        totalVideosGenerated: newCount,
+        updatedAt: Date.now(),
       })
     }
-    
+
   },
 });
 export const movevideo = mutation({
-  args:{
-    videoId:v.id('videos'),
-    folderId:v.id('folders')
+  args: {
+    videoId: v.id('videos'),
+    folderId: v.id('folders')
   },
-  handler:async (ctx ,args)=>{
+  handler: async (ctx, args) => {
     const video = await ctx.db.get(args.videoId);
-    if(!video){
+    if (!video) {
       throw Error('video not found')
     }
-    await ctx.db.patch(args.videoId,{
-      folderId:args.folderId
+    await ctx.db.patch(args.videoId, {
+      folderId: args.folderId
     })
   }
 })
 export const retryvideo = mutation({
-  args:{
-    videoId:v.id('videos')
+  args: {
+    videoId: v.id('videos')
   },
-  handler:async (ctx ,args)=>{
+  handler: async (ctx, args) => {
     const video = await ctx.db.get(args.videoId);
-    if(!video){
+    if (!video) {
       throw Error('video not found')
     }
-    await ctx.db.patch(args.videoId,{
-      status:'generating'
+    await ctx.db.patch(args.videoId, {
+      status: 'generating'
     })
-    if(!video.prompt){
+    if (!video.prompt) {
       throw Error('video prompt not found')
     }
-    await ctx.scheduler.runAfter(0,api.videos.triggerVideoGeneration,{
-      videoId:args.videoId,
-      prompt:video.prompt,
-      context:'',
-      userId:video.userId || undefined
+    await ctx.scheduler.runAfter(0, api.videos.triggerVideoGeneration, {
+      videoId: args.videoId,
+      prompt: video.prompt,
+      context: '',
+      userId: video.userId || undefined
     })
   }
 })
@@ -378,23 +382,24 @@ export const schedulevideogeneration = mutation({
     if (!user) {
       throw Error("Not authenticated");
     }
-    
+
     console.log("=== SCHEDULING VIDEO GENERATION ===");
     console.log("Original prompt:", args.prompt);
     console.log("Context length:", args.context.length);
-    
+
+    const prompt = args.prompt + "\n\n" + args.context;
     // Create the video entry first (in "generating" state)
     const videoId = await ctx.db.insert("videos", {
       userId: user.subject,
       folderId: args.folderId,
       status: "generating",
-      prompt: args.prompt, // Store original prompt
+      prompt: prompt, // Store original prompt
       public: false,
-      creatorname:user.name,
-      creatorprofile:user.pictureUrl
+      creatorname: user.name,
+      creatorprofile: user.pictureUrl
     });
     console.log("Created video entry:", videoId);
-    
+
     // Schedule the action which will enhance the prompt and trigger generation
     // Note: Can't use AI (fetch) in mutations, so enhancement happens in the action
     await ctx.scheduler.runAfter(0, api.videos.triggerVideoGeneration, {
@@ -403,7 +408,7 @@ export const schedulevideogeneration = mutation({
       context: args.context,
       userId: user.subject
     });
-    
+
     return videoId;
   },
 });
@@ -416,44 +421,77 @@ export const scheduleauthvideo = mutation({
   handler: async (ctx, args) => {
     const user = await ctx.auth.getUserIdentity();
     if (!user) throw Error("Not authenticated");
-    
+
+    const prompt = args.prompt + "\n\n" + args.context;
+
     const videoId = await ctx.db.insert("videos", {
       userId: user.subject,
       status: "generating",
-      prompt: args.prompt,
+      prompt: prompt,
       public: false,
-      creatorname:user.name,
-      creatorprofile:user.pictureUrl
+      creatorname: user.name,
+      creatorprofile: user.pictureUrl
     });
-    
+
     await ctx.scheduler.runAfter(0, api.videos.triggerVideoGeneration, {
       videoId,
       prompt: args.prompt,
       context: args.context,
       userId: user.subject,
     });
-    
+
     return videoId;
   },
 });
 
 // Action that enhances the prompt and triggers video generation
-
-
-// Note: triggerVideoGeneration is now deprecated - use enhanceAndTriggerVideo instead
-// Keeping it for backward compatibility with retry functionality
-
-// Action to trigger the Trigger.dev task
-export const triggerVideoGeneration = action({
+export const enhanceAndTriggerVideo = action({
   args: {
     videoId: v.id("videos"),
     prompt: v.string(),
     context: v.string(),
-    userId:v.optional(v.string()),
+    userId: v.string(),
   },
   handler: async (ctx, args) => {
+    console.log("=== PROMPT ENHANCEMENT ACTION ===");
+
+    // Enhance the prompt using AI
+    let enhancedPrompt = args.prompt;
+
+    try {
+      const { object } = await generateObject({
+        model: google("gemini-2.5-flash"),
+        schema: enhancedPromptSchema,
+        system: PROMPT_DIRECTOR_SYSTEM,
+        prompt: `
+## USER'S VIDEO REQUEST:
+${args.prompt}
+
+## CONTEXT (Web search results, PDF excerpts, etc.):
+${args.context || "No additional context provided."}
+
+## YOUR TASK:
+Transform the above request into a detailed, structured video prompt.
+If the request is already well-structured, set isAlreadyStructured=true and make minimal changes.
+`,
+      });
+
+      enhancedPrompt = object.structuredPrompt;
+
+      console.log("=== PROMPT ENHANCEMENT RESULT ===");
+      console.log("Already structured:", object.isAlreadyStructured);
+      console.log("Estimated duration:", object.estimatedDuration);
+      console.log("Enhanced prompt preview:", enhancedPrompt.substring(0, 300) + "...");
+
+    } catch (error) {
+      // If enhancement fails, use the original prompt with context
+      console.error("Prompt enhancement failed, using original:", error);
+      enhancedPrompt = args.prompt + "\n\nContext:\n" + args.context;
+    }
+
+    // Now trigger the actual video generation with enhanced prompt
     const TRIGGER_SECRET_KEY = process.env.TRIGGER_SECRET_KEY;
-    
+
     if (!TRIGGER_SECRET_KEY) {
       console.error("TRIGGER_SECRET_KEY is not set");
       await ctx.runMutation(api.videos.updateVideo, {
@@ -465,7 +503,7 @@ export const triggerVideoGeneration = action({
 
     try {
       console.log("Triggering video generation task on Trigger.dev...");
-      
+
       const response = await fetch("https://api.trigger.dev/api/v1/tasks/generate-video/trigger", {
         method: "POST",
         headers: {
@@ -475,9 +513,9 @@ export const triggerVideoGeneration = action({
         body: JSON.stringify({
           payload: {
             videoId: args.videoId,
-            prompt: args.prompt,
+            prompt: enhancedPrompt,
             context: args.context,
-            userId:args.userId
+            userId: args.userId
           },
         }),
       });
@@ -494,7 +532,74 @@ export const triggerVideoGeneration = action({
 
       const result = await response.json();
       console.log("Task triggered successfully:", result);
-      
+
+      return { success: true, runId: result.id };
+    } catch (error) {
+      console.error("Error triggering video generation:", error);
+      await ctx.runMutation(api.videos.updateVideo, {
+        videoId: args.videoId,
+        status: "failed",
+      });
+      throw error;
+    }
+  },
+});
+
+// Note: triggerVideoGeneration is now deprecated - use enhanceAndTriggerVideo instead
+// Keeping it for backward compatibility with retry functionality
+
+// Action to trigger the Trigger.dev task
+export const triggerVideoGeneration = action({
+  args: {
+    videoId: v.id("videos"),
+    prompt: v.string(),
+    context: v.string(),
+    userId: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const TRIGGER_SECRET_KEY = process.env.TRIGGER_SECRET_KEY;
+
+    if (!TRIGGER_SECRET_KEY) {
+      console.error("TRIGGER_SECRET_KEY is not set");
+      await ctx.runMutation(api.videos.updateVideo, {
+        videoId: args.videoId,
+        status: "failed",
+      });
+      throw new Error("TRIGGER_SECRET_KEY is not configured");
+    }
+
+    try {
+      console.log("Triggering video generation task on Trigger.dev...");
+
+      const response = await fetch("https://api.trigger.dev/api/v1/tasks/generate-video/trigger", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${TRIGGER_SECRET_KEY}`,
+        },
+        body: JSON.stringify({
+          payload: {
+            videoId: args.videoId,
+            prompt: args.prompt,
+            context: args.context,
+            userId: args.userId
+          },
+        }),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error("Failed to trigger task:", errorText);
+        await ctx.runMutation(api.videos.updateVideo, {
+          videoId: args.videoId,
+          status: "failed",
+        });
+        throw new Error(`Failed to trigger task: ${errorText}`);
+      }
+
+      const result = await response.json();
+      console.log("Task triggered successfully:", result);
+
       return { success: true, runId: result.id };
     } catch (error) {
       console.error("Error triggering video generation:", error);
@@ -513,7 +618,7 @@ export const getRecentVideos = query({
   handler: async (ctx) => {
     const user = await ctx.auth.getUserIdentity();
     if (!user) return [];
-    
+
     // Fetch last 5 videos created by user
     return await ctx.db
       .query("videos")
@@ -530,14 +635,14 @@ export const replaceOldDomains = mutation({
     const newDomain = "https://videos.foldex.space";
 
     const videos = await ctx.db.query("videos").collect();
-    
+
     let updatedCount = 0;
 
     // Loop through them and fix the URL
     for (const video of videos) {
       // Check if the video has a URL and if it contains the old domain
       if (video.url && video.url.startsWith(oldDomain)) {
-        
+
         // Create the new URL by replacing the old part
         const newUrl = video.url.replace(oldDomain, newDomain);
 
@@ -548,7 +653,7 @@ export const replaceOldDomains = mutation({
 
         updatedCount++;
       }
-      if(video.thumbnail && video.thumbnail.startsWith(oldDomain)){
+      if (video.thumbnail && video.thumbnail.startsWith(oldDomain)) {
         const newThumbnail = video.thumbnail.replace(oldDomain, newDomain);
         await ctx.db.patch(video._id, {
           thumbnail: newThumbnail,
@@ -633,5 +738,155 @@ export const getPublicVideosWithAccess = query({
       isLocked: !freeIds.includes(v._id),
       isFreeToday: freeIds.includes(v._id),
     }));
+  },
+});
+
+export const claimvideos = mutation({
+  args: {
+    folderId: v.optional(v.id("folders")),
+  },
+  handler: async (ctx, args) => {
+    const user = await ctx.auth.getUserIdentity();
+    if (!user) {
+      throw Error('not authenticated')
+    }
+    const videos = await ctx.db.query('videos').withIndex('by_user', (q) => q.eq('userId', user.subject)).filter((q) => q.eq(q.field("folderId"), undefined)).collect();
+
+    let targetFolderId: Id<"folders">;
+
+    // If folderId provided, verify it exists and belongs to user
+    if (args.folderId) {
+      const folder = await ctx.db.get(args.folderId);
+      if (!folder || folder.userId !== user.subject) {
+        throw new Error("Folder not found or access denied");
+      }
+      targetFolderId = args.folderId;
+    } else {
+      // Create "Your Videos" folder for new users
+      const newFolderId = await ctx.runMutation(api.folders.createFolder, {
+        name: "Your Videos",
+      });
+      targetFolderId = newFolderId;
+    }
+
+    // Claim all videos
+    for (const video of videos) {
+      await ctx.db.patch(video._id, {
+        userId: user.subject,
+        folderId: targetFolderId,
+        creatorname: user.name,
+        creatorprofile: user.pictureUrl
+      })
+    }
+
+    return {
+      success: true,
+      folderId: targetFolderId,
+      videoCount: videos.length
+    };
+  }
+})
+
+export const haveunclaimedvideos = query({
+  handler: async (ctx) => {
+    const user = await ctx.auth.getUserIdentity()
+    if (!user) {
+      return null;
+    }
+
+    const videos = await ctx.db.query('videos')
+      .withIndex('by_user_and_folder', (q) =>
+        q.eq('userId', user.subject).eq("folderId", undefined)
+      )
+      .collect();
+    return {
+      hasUnclaimed: videos.length > 0,
+      count: videos.length
+    }
+  }
+})
+
+export const submitFeedback = mutation({
+  args: {
+    videoId: v.id("videos"),
+    type: v.union(v.literal("like"), v.literal("dislike")),
+    tags: v.optional(v.array(v.string())),
+    comment: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) {
+      throw new Error("You must be logged in to submit feedback.");
+    }
+
+    const userId = identity.subject;
+
+    const video = await ctx.db.get(args.videoId);
+    if (!video) throw new Error("Video not found.");
+
+    const existingFeedback = await ctx.db
+      .query("videofeedback")
+      .withIndex("by_user_and_video", (q) =>
+        q.eq("userId", userId).eq("videoId", args.videoId)
+      )
+      .unique();
+
+    let likesDelta = 0;
+    let dislikesDelta = 0;
+
+    if (existingFeedback) {
+      if (existingFeedback.type === args.type) {
+        // THE FIX: Are they just adding/updating tags to an existing vote?
+        if (args.tags) {
+          await ctx.db.patch(existingFeedback._id, {
+            tags: args.tags,
+            comment: args.comment,
+          });
+          // Note: Deltas stay 0 because the vote type didn't change!
+        } else {
+          // SCENARIO 3: Real Toggle off (clicking the button again without tags)
+          await ctx.db.delete(existingFeedback._id);
+          if (args.type === "like") likesDelta = -1;
+          if (args.type === "dislike") dislikesDelta = -1;
+        }
+      } else {
+        // SCENARIO 2: Switching vote (Like -> Dislike)
+        await ctx.db.patch(existingFeedback._id, {
+          type: args.type,
+          tags: args.tags,
+          comment: args.comment,
+        });
+
+        if (args.type === "like") {
+          likesDelta = 1;
+          dislikesDelta = -1;
+        } else {
+          likesDelta = -1;
+          dislikesDelta = 1;
+        }
+      }
+    } else {
+      // SCENARIO 1: Voting for the first time
+      await ctx.db.insert("videofeedback", {
+        videoId: args.videoId,
+        userId: userId,
+        type: args.type,
+        tags: args.tags,
+        comment: args.comment,
+      });
+
+      if (args.type === "like") likesDelta = 1;
+      if (args.type === "dislike") dislikesDelta = 1;
+    }
+
+    // Update the counters
+    if (likesDelta !== 0 || dislikesDelta !== 0) {
+      await ctx.db.patch(args.videoId, {
+        likes: (video.likes || 0) + likesDelta,
+        dislikes: (video.dislikes || 0) + dislikesDelta,
+      });
+    }
+
+    return { success: true };
   },
 });

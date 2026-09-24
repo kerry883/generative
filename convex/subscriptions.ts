@@ -2,7 +2,7 @@ import { v } from "convex/values";
 import { query, mutation, internalMutation } from "./_generated/server";
 import { api } from "./_generated/api";
 import { Id } from "./_generated/dataModel";
-
+import { polar } from "./polar";
 
 // Free tier limits
 const FREE_LIMITS = {
