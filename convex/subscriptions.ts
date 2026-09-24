@@ -2,7 +2,6 @@ import { v } from "convex/values";
 import { query, mutation, internalMutation } from "./_generated/server";
 import { api } from "./_generated/api";
 import { Id } from "./_generated/dataModel";
-import { polar } from "./polar";
 
 // Free tier limits
 const FREE_LIMITS = {
@@ -68,16 +67,16 @@ const PRO_LIMITS = {
 //     }catch(e){
 //       console.log("polar error ",e)
 //       return { isFree: true, isPro: false, error: "Billing service unavailable" };
-      
+
 //     }
 
 //   }
 // })
 export const getSubscription = query({
-  handler:async(ctx)=>{
+  handler: async (ctx) => {
     const user = await ctx.auth.getUserIdentity();
-    if(!user) return null;
-    const subscription = await ctx.db.query('subscriptions').withIndex('by_user',(q)=>q.eq('userId',user.subject)).first();
+    if (!user) return null;
+    const subscription = await ctx.db.query('subscriptions').withIndex('by_user', (q) => q.eq('userId', user.subject)).first();
     return subscription;
   }
 })
@@ -130,31 +129,31 @@ export const getOrCreateUsageTracking = mutation({
 const getNextResetTime = () => {
   const now = new Date();
   const utcNow = new Date(now.toISOString());
-  
+
   // Set to 24:00:00.000 UTC (Which is 00:00:00 the next day)
   utcNow.setUTCHours(24, 0, 0, 0);
-  
+
   return utcNow.getTime();
 };
 
 // // Check if user can perform AI chat
 export const canUseAiChat = query({
-  args:{},
-  handler: async (ctx)=>{
+  args: {},
+  handler: async (ctx) => {
     const user = await ctx.auth.getUserIdentity();
-    if(!user){
+    if (!user) {
       return null
-    } 
-    const subscription = await ctx.db.query('subscriptions').withIndex('by_user',(q)=>q.eq('userId',user.subject)).first();
+    }
+    const subscription = await ctx.db.query('subscriptions').withIndex('by_user', (q) => q.eq('userId', user.subject)).first();
     const isPro = subscription?.tier === 'pro';
-    
-    const remaining = await ctx.db.query('usageTracking').withIndex('by_user',(q)=>q.eq('userId',user.subject)).first();
+
+    const remaining = await ctx.db.query('usageTracking').withIndex('by_user', (q) => q.eq('userId', user.subject)).first();
     const aiTokens = remaining?.dailyAiTokens || 0;
-    
+
     // Check limits based on tier
     const limit = isPro ? PRO_LIMITS.DAILY_TOKENS : FREE_LIMITS.DAILY_TOKENS;
-    
-    if(aiTokens >= limit){
+
+    if (aiTokens >= limit) {
       return {
         allowed: false,
         reason: isPro ? "pro_limit_reached" : "free_limit_reached",
@@ -168,29 +167,29 @@ export const canUseAiChat = query({
       allowed: true,
       reason: null,
       isPro: isPro,
-    }  
+    }
   }
 })
 
- // Check if user can upload files
+// Check if user can upload files
 export const canUploadFile = query({
   args: {},
   handler: async (ctx) => {
     const user = await ctx.auth.getUserIdentity();
-    if(!user){
+    if (!user) {
       return null
-    } 
+    }
     const status = await ctx.runQuery(api.subscriptions.getSubscription);
     // Pro users have unlimited file uploads
-    if(status?.tier === 'pro'){
+    if (status?.tier === 'pro') {
       return {
         allowed: true,
         reason: null
       }
     }
-    const remaining = await ctx.db.query('usageTracking').withIndex('by_user',(q)=>q.eq('userId',user.subject)).first();
+    const remaining = await ctx.db.query('usageTracking').withIndex('by_user', (q) => q.eq('userId', user.subject)).first();
     const filesUploaded = remaining?.totalFilesUploaded || 0;
-    if(filesUploaded >= FREE_LIMITS.TOTAL_FILE_UPLOADS){
+    if (filesUploaded >= FREE_LIMITS.TOTAL_FILE_UPLOADS) {
       return {
         allowed: false,
         reason: "free_limit_reached",
@@ -201,16 +200,16 @@ export const canUploadFile = query({
     return {
       allowed: true,
       reason: null
-    }   
+    }
   },
 });
 export const canDownloadVideo = query({
-  handler:async (ctx)=>{
+  handler: async (ctx) => {
     const subscription = await ctx.runQuery(api.subscriptions.getSubscription);
-    if(subscription?.tier === 'pro'){
+    if (subscription?.tier === 'pro') {
       return {
-        allowed:true,
-        reason:null
+        allowed: true,
+        reason: null
       }
     }
 
@@ -221,12 +220,12 @@ export const canDownloadVideo = query({
   }
 })
 export const canUseProModels = query({
-  handler:async (ctx)=>{
+  handler: async (ctx) => {
     const subscription = await ctx.runQuery(api.subscriptions.getSubscription);
-    if(subscription?.tier === 'pro'){
+    if (subscription?.tier === 'pro') {
       return {
-        allowed:true,
-        reason:null
+        allowed: true,
+        reason: null
       }
     }
 
@@ -238,13 +237,13 @@ export const canUseProModels = query({
 })
 // // Check if user can generate flashcards
 export const canGenerateFlashcard = query({
-  args: {count:v.optional(v.number())},
-  handler:async (ctx,args) => {
-   const user = await ctx.auth.getUserIdentity();
+  args: { count: v.optional(v.number()) },
+  handler: async (ctx, args) => {
+    const user = await ctx.auth.getUserIdentity();
     if (!user) return null;
 
     const subscription = await ctx.runQuery(api.subscriptions.getSubscription);
-    
+
     // Pro users are unlimited for flashcards
     if (subscription?.tier === 'pro') {
       return { allowed: true, reason: null };
@@ -258,7 +257,7 @@ export const canGenerateFlashcard = query({
       .first();
 
     const currentUsage = usage?.dailyFlashcardsGenerated || 0;
-    
+
     // Check if adding the new cards exceeds the limit
     if (currentUsage + countNeeded > FREE_LIMITS.DAILY_FLASHCARDS) {
       const remaining = Math.max(0, FREE_LIMITS.DAILY_FLASHCARDS - currentUsage);
@@ -271,19 +270,19 @@ export const canGenerateFlashcard = query({
     }
 
     return { allowed: true, reason: null };
-  
+
   },
 });
 
 // Check if user can use chat with PDF
 export const canUseChatWithPDF = query({
   args: {},
-  handler: async (ctx) => { 
+  handler: async (ctx) => {
     const subscription = await ctx.runQuery(api.subscriptions.getSubscription);
-    if(subscription?.tier === 'pro'){
+    if (subscription?.tier === 'pro') {
       return {
-        allowed:true,
-        reason:null
+        allowed: true,
+        reason: null
       }
     }
 
@@ -295,12 +294,12 @@ export const canUseChatWithPDF = query({
 });
 export const canUseAIGrading = query({
   args: {},
-  handler: async (ctx) => { 
+  handler: async (ctx) => {
     const subscription = await ctx.runQuery(api.subscriptions.getSubscription);
-    if(subscription?.tier === 'pro'){
+    if (subscription?.tier === 'pro') {
       return {
-        allowed:true,
-        reason:null
+        allowed: true,
+        reason: null
       }
     }
 
@@ -312,30 +311,30 @@ export const canUseAIGrading = query({
 });
 
 export const canGenerateVideo = query({
-  args:{},
-  handler:async (ctx)=>{
+  args: {},
+  handler: async (ctx) => {
     const user = await ctx.auth.getUserIdentity();
-    if(!user){
+    if (!user) {
       return null;
-    } 
+    }
     const status = await ctx.runQuery(api.subscriptions.getSubscription);
-    if(status?.tier === 'pro'){
+    if (status?.tier === 'pro') {
       return {
-        allowed:true,
-        reason:null
+        allowed: true,
+        reason: null
       }
     }
-    const remaining = await ctx.db.query('usageTracking').withIndex('by_user',(q)=>q.eq('userId',user.subject)).first();
+    const remaining = await ctx.db.query('usageTracking').withIndex('by_user', (q) => q.eq('userId', user.subject)).first();
     const videosGenerated = remaining?.totalVideosGenerated || 0;
-    if(videosGenerated >= FREE_LIMITS.TOTAL_VIDEO){
+    if (videosGenerated >= FREE_LIMITS.TOTAL_VIDEO) {
       return {
-        allowed:false,
-        reason:"free_limit_reached",
-        videosGenerated:videosGenerated,
-        videosLimit:FREE_LIMITS.TOTAL_VIDEO
+        allowed: false,
+        reason: "free_limit_reached",
+        videosGenerated: videosGenerated,
+        videosLimit: FREE_LIMITS.TOTAL_VIDEO
       }
     }
-    return { allowed: true, reason: null, isPro: false }   
+    return { allowed: true, reason: null, isPro: false }
   }
 })
 export const canTranscribe = query({
@@ -348,18 +347,18 @@ export const canTranscribe = query({
     isPro?: boolean;
   } | null> => {
     const user = await ctx.auth.getUserIdentity();
-    if(!user) return null;
-    
-    const subscription = await ctx.db.query('subscriptions').withIndex('by_user',(q)=>q.eq('userId',user.subject)).first();
+    if (!user) return null;
+
+    const subscription = await ctx.db.query('subscriptions').withIndex('by_user', (q) => q.eq('userId', user.subject)).first();
     const isPro: boolean = subscription?.tier === 'pro';
-    
-    const remaining = await ctx.db.query('usageTracking').withIndex('by_user',(q)=>q.eq('userId',user.subject)).first();
+
+    const remaining = await ctx.db.query('usageTracking').withIndex('by_user', (q) => q.eq('userId', user.subject)).first();
     const transcriptions = remaining?.dailyTranscriptionsGenerated || 0;
-    
+
     // Check limits based on tier
     const limit = isPro ? PRO_LIMITS.DAILY_TRANSCRIPTIONS : FREE_LIMITS.DAILY_TRANSCRIPTIONS;
-    
-    if(transcriptions >= limit){
+
+    if (transcriptions >= limit) {
       return {
         allowed: false,
         reason: isPro ? "pro_limit_reached" : "free_limit_reached",
@@ -461,8 +460,8 @@ export const trackFileUpload = mutation({
 
 // Track flashcard generation
 export const trackFlashcardGeneration = mutation({
-  args: {count:v.number()},
-  handler: async (ctx,args) => {
+  args: { count: v.number() },
+  handler: async (ctx, args) => {
     const user = await ctx.auth.getUserIdentity();
     if (!user) {
       throw new Error("Not authenticated");
@@ -505,9 +504,9 @@ export const trackFlashcardGeneration = mutation({
   },
 });
 export const trackVideoGeneration = mutation({
-  args:{userId:v.string()},
-  handler: async (ctx,args)=>{
-     
+  args: { userId: v.string() },
+  handler: async (ctx, args) => {
+
     let usage = await ctx.db
       .query("usageTracking")
       .withIndex("by_user", (q) => q.eq("userId", args.userId))
@@ -522,24 +521,24 @@ export const trackVideoGeneration = mutation({
         dailyFlashcardsGenerated: 0,
         lastResetDate: today,
         totalFilesUploaded: 0,
-        totalVideosGenerated:1,
-        dailyTranscriptionsGenerated:0,
+        totalVideosGenerated: 1,
+        dailyTranscriptionsGenerated: 0,
         updatedAt: now,
       });
       return;
     }
     await ctx.db.patch(usage._id, {
-        totalVideosGenerated: usage.totalVideosGenerated + 1,
+      totalVideosGenerated: usage.totalVideosGenerated + 1,
       updatedAt: Date.now(),
     });
-    
+
   }
 })
 export const trackTranscriptionGeneration = mutation({
-  handler:async(ctx)=>{
+  handler: async (ctx) => {
     const user = await ctx.auth.getUserIdentity();
     if (!user) throw new Error('not authenticated ')
-    const usage = await ctx.db.query('usageTracking').withIndex('by_user',(q)=>q.eq('userId',user.subject)).first()
+    const usage = await ctx.db.query('usageTracking').withIndex('by_user', (q) => q.eq('userId', user.subject)).first()
     if (!usage || !usage.dailyTranscriptionsGenerated) {
       const now = Date.now();
       const today = new Date().toISOString().split("T")[0];
@@ -549,25 +548,25 @@ export const trackTranscriptionGeneration = mutation({
         dailyFlashcardsGenerated: 0,
         lastResetDate: today,
         totalFilesUploaded: 0,
-        totalVideosGenerated:0,
-        dailyTranscriptionsGenerated:1,
+        totalVideosGenerated: 0,
+        dailyTranscriptionsGenerated: 1,
         updatedAt: now,
       });
       return;
     }
-     const today = new Date().toISOString().split("T")[0];
-     if(usage.lastResetDate !== today){
-      await ctx.db.patch(usage._id,{
-        dailyTranscriptionsGenerated:0,
-        lastResetDate:today,
-        updatedAt:Date.now(),
-      })
-     }else{
+    const today = new Date().toISOString().split("T")[0];
+    if (usage.lastResetDate !== today) {
       await ctx.db.patch(usage._id, {
-      dailyTranscriptionsGenerated:usage.dailyTranscriptionsGenerated +1,
-      updatedAt: Date.now(),
-    });
-  }
+        dailyTranscriptionsGenerated: 0,
+        lastResetDate: today,
+        updatedAt: Date.now(),
+      })
+    } else {
+      await ctx.db.patch(usage._id, {
+        dailyTranscriptionsGenerated: usage.dailyTranscriptionsGenerated + 1,
+        updatedAt: Date.now(),
+      });
+    }
   }
 })
 // Helper to update subscription from Polar webhook

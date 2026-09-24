@@ -1,8 +1,6 @@
 import { v } from "convex/values";
 import { action, mutation, query } from "./_generated/server";
 import { api } from "./_generated/api";
-import { generateObject, generateText } from "ai";
-import { google } from "@ai-sdk/google";
 import { z } from "zod";
 import { DatabaseReader } from "./_generated/server";
 import { Doc, Id } from "./_generated/dataModel";
@@ -445,105 +443,6 @@ export const scheduleauthvideo = mutation({
 });
 
 // Action that enhances the prompt and triggers video generation
-export const enhanceAndTriggerVideo = action({
-  args: {
-    videoId: v.id("videos"),
-    prompt: v.string(),
-    context: v.string(),
-    userId: v.string(),
-  },
-  handler: async (ctx, args) => {
-    console.log("=== PROMPT ENHANCEMENT ACTION ===");
-
-    // Enhance the prompt using AI
-    let enhancedPrompt = args.prompt;
-
-    try {
-      const { object } = await generateObject({
-        model: google("gemini-2.5-flash"),
-        schema: enhancedPromptSchema,
-        system: PROMPT_DIRECTOR_SYSTEM,
-        prompt: `
-## USER'S VIDEO REQUEST:
-${args.prompt}
-
-## CONTEXT (Web search results, PDF excerpts, etc.):
-${args.context || "No additional context provided."}
-
-## YOUR TASK:
-Transform the above request into a detailed, structured video prompt.
-If the request is already well-structured, set isAlreadyStructured=true and make minimal changes.
-`,
-      });
-
-      enhancedPrompt = object.structuredPrompt;
-
-      console.log("=== PROMPT ENHANCEMENT RESULT ===");
-      console.log("Already structured:", object.isAlreadyStructured);
-      console.log("Estimated duration:", object.estimatedDuration);
-      console.log("Enhanced prompt preview:", enhancedPrompt.substring(0, 300) + "...");
-
-    } catch (error) {
-      // If enhancement fails, use the original prompt with context
-      console.error("Prompt enhancement failed, using original:", error);
-      enhancedPrompt = args.prompt + "\n\nContext:\n" + args.context;
-    }
-
-    // Now trigger the actual video generation with enhanced prompt
-    const TRIGGER_SECRET_KEY = process.env.TRIGGER_SECRET_KEY;
-
-    if (!TRIGGER_SECRET_KEY) {
-      console.error("TRIGGER_SECRET_KEY is not set");
-      await ctx.runMutation(api.videos.updateVideo, {
-        videoId: args.videoId,
-        status: "failed",
-      });
-      throw new Error("TRIGGER_SECRET_KEY is not configured");
-    }
-
-    try {
-      console.log("Triggering video generation task on Trigger.dev...");
-
-      const response = await fetch("https://api.trigger.dev/api/v1/tasks/generate-video/trigger", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${TRIGGER_SECRET_KEY}`,
-        },
-        body: JSON.stringify({
-          payload: {
-            videoId: args.videoId,
-            prompt: enhancedPrompt,
-            context: args.context,
-            userId: args.userId
-          },
-        }),
-      });
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error("Failed to trigger task:", errorText);
-        await ctx.runMutation(api.videos.updateVideo, {
-          videoId: args.videoId,
-          status: "failed",
-        });
-        throw new Error(`Failed to trigger task: ${errorText}`);
-      }
-
-      const result = await response.json();
-      console.log("Task triggered successfully:", result);
-
-      return { success: true, runId: result.id };
-    } catch (error) {
-      console.error("Error triggering video generation:", error);
-      await ctx.runMutation(api.videos.updateVideo, {
-        videoId: args.videoId,
-        status: "failed",
-      });
-      throw error;
-    }
-  },
-});
 
 // Note: triggerVideoGeneration is now deprecated - use enhanceAndTriggerVideo instead
 // Keeping it for backward compatibility with retry functionality
