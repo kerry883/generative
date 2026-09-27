@@ -12,6 +12,7 @@ import { generateJson, QWEN_VISION, type Log } from "./llm";
 const FFMPEG = process.env.FFMPEG_PATH ?? "ffmpeg";
 const FFPROBE = process.env.FFPROBE_PATH ?? "ffprobe";
 
+const MID_ANIMATION = /mid-?animation|in progress|being (written|drawn|created)|partially (written|drawn)|only (visible )?in frame/i;
 const PAIRS_PER_CALL = 4;
 const PAIR_GAP_SECONDS = 1;
 const MIN_FRAMES = 6;
@@ -43,6 +44,7 @@ const reviewSchema = z.object({
     z.object({
       frame: z.number().describe("The pair number N (for frames Na and Nb)"),
       problem: z.string().describe("What is wrong and where on screen, naming the visible text or object"),
+      visibleInBoth: z.boolean().describe("true only if the same problem is clearly visible in BOTH Na and Nb"),
       severity: z.enum(["high", "low"]),
     }),
   ),
@@ -111,6 +113,8 @@ export async function reviewVideo(log: Log, videoUrl: string): Promise<VisualRev
           const review = await generateJson(log, QWEN_VISION, reviewSchema, REVIEW_SYSTEM, content);
           return review.issues
             .filter((issue) => issue.frame >= 1 && issue.frame <= batch.length)
+            // Anything not in both frames, or described as unfinished, is an animation in progress.
+            .filter((issue) => issue.visibleInBoth && !MID_ANIMATION.test(issue.problem))
             .map((issue) => ({ time: batch[issue.frame - 1].time, problem: issue.problem, severity: issue.severity }));
         } catch (e) {
           log.warn("Frame review batch failed", { error: String(e) });

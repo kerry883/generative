@@ -274,12 +274,18 @@ async function renderWithRepairs(
     } else {
       reason = "render";
       log.info(`Rendering attempt ${attempt}/${maxAttempts}`);
-      const render = await renderVideo(SCENE_CLASS, prepared.code);
+      const render = await renderVideo(log, SCENE_CLASS, prepared.code);
       if (render.ok) {
         log.info(`Video rendered on attempt ${attempt}`, { url: render.data.video_url });
         return { ok: true, render: render.data, bodies, code: prepared.code, attempts: attempt };
       }
       failure = render.error;
+      if (render.transient) {
+        // The service stayed unavailable through every backoff: not a code problem.
+        trace.renderErrors.push(failure);
+        log.error("Render service unavailable", { error: failure.slice(0, 300) });
+        return { ok: false, error: `Render service unavailable: ${failure.slice(0, 300)}`, code, attempts: attempt };
+      }
       line = errorLine(failure);
     }
 
@@ -320,21 +326,38 @@ async function renderWithRepairs(
   return { ok: false, error: failure, code, attempts: maxAttempts };
 }
 
+// Rate limits and gateway errors say nothing about the code: wait and send the
+// same code again instead of asking the model to "fix" it.
+const TRANSIENT_STATUS = new Set([429, 502, 503, 504]);
+const TRANSIENT_TEXT = /rate exceeded|too many requests|temporarily unavailable|service unavailable|upstream|timed? ?out/i;
+const RENDER_BACKOFF_MS = [30_000, 60_000, 120_000, 240_000];
+
 async function renderVideo(
+  log: Log,
   sceneName: string,
   code: string,
-): Promise<{ ok: true; data: RenderData } | { ok: false; error: string }> {
-  try {
-    const response = await fetch(`${MANIM_API_URL}/generate-video`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ scenename: sceneName, code }),
-      signal: AbortSignal.timeout(RENDER_TIMEOUT_MS),
-    });
-    if (response.ok) return { ok: true, data: (await response.json()) as RenderData };
-    return { ok: false, error: await response.text() };
-  } catch (e) {
-    return { ok: false, error: `Render request failed: ${e instanceof Error ? e.message : String(e)}` };
+): Promise<{ ok: true; data: RenderData } | { ok: false; error: string; transient: boolean }> {
+  for (let retry = 0; ; retry++) {
+    let error: string;
+    let transient: boolean;
+    try {
+      const response = await fetch(`${MANIM_API_URL}/generate-video`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ scenename: sceneName, code }),
+        signal: AbortSignal.timeout(RENDER_TIMEOUT_MS),
+      });
+      if (response.ok) return { ok: true, data: (await response.json()) as RenderData };
+      error = await response.text();
+      transient = TRANSIENT_STATUS.has(response.status) || (error.length < 300 && TRANSIENT_TEXT.test(error));
+    } catch (e) {
+      error = `Render request failed: ${e instanceof Error ? e.message : String(e)}`;
+      transient = true;
+    }
+    if (!transient || retry >= RENDER_BACKOFF_MS.length) return { ok: false, error, transient };
+    const wait = RENDER_BACKOFF_MS[retry] + Math.round(Math.random() * 5000);
+    log.warn("Render service busy or unreachable; retrying the same code", { error: error.slice(0, 200), waitSeconds: Math.round(wait / 1000) });
+    await new Promise((resolve) => setTimeout(resolve, wait));
   }
 }
 
