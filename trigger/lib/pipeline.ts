@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { generateJson, generateParsed, QWEN_MAX, QWEN_PLUS, type Log } from "./llm";
-import { searchTopic, type Source } from "./research";
+import { condenseContext, searchTopic, type Source } from "./research";
 import {
   SEARCH_QUERY_SYSTEM,
   buildSearchQueryPrompt,
@@ -78,7 +78,10 @@ export async function runVideoPipeline(log: Log, input: PipelineInput): Promise<
     reasoning: searchAnalysis.reasoning,
   });
 
-  const { content: searchContent, sources } = await searchTopic(log, searchAnalysis.searchQuery);
+  const [{ content: searchContent, sources }, documentContext] = await Promise.all([
+    searchTopic(log, searchAnalysis.searchQuery),
+    condenseContext(log, prompt, context),
+  ]);
   trace.sourcesCount = sources.length;
 
   // ═══════════════════════════════════════
@@ -95,7 +98,7 @@ export async function runVideoPipeline(log: Log, input: PipelineInput): Promise<
       title: z.string().describe("Suggested video title"),
     }),
     DIRECTOR_SYSTEM,
-    buildDirectorPrompt(prompt, searchContent, context),
+    buildDirectorPrompt(prompt, searchContent, documentContext),
   );
   trace.directorScript = directorScript.script;
   trace.estimatedDuration = directorScript.estimatedDuration;
