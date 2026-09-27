@@ -1,4 +1,4 @@
-import { logger } from "@trigger.dev/sdk/v3";
+import { logger } from "@trigger.dev/sdk";
 
 // ═══════════════════════════════════════════════════
 // Skills are inlined as string constants so they're
