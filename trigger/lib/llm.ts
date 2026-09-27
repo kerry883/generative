@@ -40,13 +40,32 @@ export function extractJson(text: string): unknown {
   return JSON.parse(cleaned.slice(start, end + 1));
 }
 
+// Vision-capable model: frame review of rendered videos
+export const QWEN_VISION = process.env.QWEN_VISION_MODEL ?? "Qwen/Qwen3.5-122B-A10B";
+
+// A user message: plain text, or text and images.
+export type PromptContent =
+  | string
+  | Array<{ type: "text"; text: string } | { type: "file"; data: Uint8Array; mediaType: string }>;
+
+// Error message including nested causes (e.g. the network error behind an
+// "Failed to process successful response" stream failure).
+function describeError(e: unknown): string {
+  const parts: string[] = [];
+  for (let cur: unknown = e, depth = 0; cur && depth < 4; depth++) {
+    parts.push(cur instanceof Error ? cur.message : String(cur));
+    cur = cur instanceof Error ? cur.cause : undefined;
+  }
+  return parts.join(" <- ");
+}
+
 // Streams a plain-text response and parses it, retrying up to 3 times with the
 // parse error fed back to the model.
 export async function generateParsed<T>(
   log: Log,
   model: string,
   system: string,
-  prompt: string,
+  prompt: PromptContent,
   parse: (text: string) => T,
   invalidHint = "Follow the required response format exactly.",
 ): Promise<T> {
@@ -60,11 +79,11 @@ export async function generateParsed<T>(
         system: lastError
           ? `${system}\n\nYour previous response was invalid: ${lastError}\n${invalidHint}`
           : system,
-        prompt,
+        messages: [{ role: "user", content: prompt }],
       });
       return parse(await result.text);
     } catch (e) {
-      lastError = (e instanceof Error ? e.message : String(e)).slice(0, 500);
+      lastError = describeError(e).slice(0, 500);
     }
     log.warn("Model call failed, retrying", { model, attempt, error: lastError });
   }
@@ -77,7 +96,7 @@ export async function generateJson<T extends z.ZodType>(
   model: string,
   schema: T,
   system: string,
-  prompt: string,
+  prompt: PromptContent,
 ): Promise<z.output<T>> {
   const schemaText = JSON.stringify(z.toJSONSchema(schema), null, 2);
   return generateParsed(
