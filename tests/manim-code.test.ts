@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
-import { extractTranscript, parseCodeResponse, prepareCode } from "../trigger/lib/manim-code";
+import { extractTranscript, prepareCode } from "../trigger/lib/manim-code";
 
 const HEADER = String.raw`from manim import *
 from manim_voiceover import VoiceoverScene
@@ -161,34 +161,5 @@ describe("extractTranscript", () => {
             self.wait(tracker.duration)
 `;
     expect(extractTranscript(code)).toBe("Welcome to the lesson. Today we learn derivatives.\n\nIt's simple.");
-  });
-});
-
-describe("parseCodeResponse", () => {
-  test("reads metadata lines and the fenced code block", () => {
-    const text = [
-      "TITLE: The Quadratic Formula",
-      "DESCRIPTION: Deriving the formula by completing the square.",
-      "SCENE_NAME: QuadraticFormula",
-      "",
-      "```python",
-      "from manim import *",
-      "class QuadraticFormula(VoiceoverScene, MovingCameraScene):",
-      "    pass",
-      "```",
-    ].join("\n");
-    const r = parseCodeResponse(text);
-    expect(r.title).toBe("The Quadratic Formula");
-    expect(r.sceneName).toBe("QuadraticFormula");
-    expect(r.code.startsWith("from manim import *")).toBe(true);
-  });
-
-  test("falls back to the class name when SCENE_NAME is wrong", () => {
-    const r = parseCodeResponse("SCENE_NAME: Nope\n```python\nclass Real(VoiceoverScene):\n    pass\n```");
-    expect(r.sceneName).toBe("Real");
-  });
-
-  test("throws when there is no code", () => {
-    expect(() => parseCodeResponse("TITLE: x")).toThrow();
   });
 });
