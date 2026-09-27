@@ -154,6 +154,8 @@ The frame is 14.2 units wide (x from -7.1 to 7.1) and 8 units tall (y from -4 to
 - Text inside a shape: label.scale_to_fit_width(box.width * 0.85), then label.move_to(box).
 - Within your scene, FadeOut content that is no longer needed before new content takes its place, so nothing overlaps.
 - Zooming: fade out labels first, then self.play(self.camera.frame.animate.scale(0.5).move_to(target), run_time=tracker.duration * 0.4).
+- While zoomed in, the visible area is smaller: place any new text relative to the camera, e.g. label.scale(0.5).next_to(target, UP, buff=0.2) or label.move_to(self.camera.frame.get_top() + DOWN * 0.5), and keep it inside self.camera.frame. Prefer zooming back out before showing text.
+- Keep diagrams and formulas apart: a formula must not sit on axes, tick labels or curves. Put formulas in free space (e.g. .to_corner(UR)) or shrink the graph first.
 
 == 5. MANIM API PITFALLS ==
 - Brace labels: create a Text or MathTex and place it with .next_to(brace, brace.direction, buff=0.2). Do not pass font_size to brace.get_text().
