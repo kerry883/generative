@@ -9,17 +9,37 @@ import {
   SKILL_SELECTOR_SYSTEM,
   buildSkillSelectorPrompt,
   CODER_SYSTEM,
-  buildCoderPrompt,
-  buildRepairPrompt,
+  buildScenePrompt,
+  buildSceneRepairPrompt,
+  buildSceneVisualRepairPrompt,
 } from "./prompts";
-import { extractTranscript, parseCodeResponse, prepareCode, type SyncStats } from "./manim-code";
+import { checkSyntax, extractTranscript, prepareCode, type SyncStats } from "./manim-code";
+import {
+  assembleFile,
+  errorLine,
+  estimateSceneTimes,
+  markLine,
+  parseDirectorScript,
+  parseSceneBody,
+  SCENE_CLASS,
+  sceneForIssue,
+  sceneForLine,
+  sceneForText,
+  type ScriptScene,
+} from "./scenes";
+import { formatTime, highIssues, reviewVideo, type VisualIssue, type VisualReview } from "./visual-qa";
 import { getSkillManifest, loadSkills, formatManifestForSelector } from "../skill-loader";
 
 // Manim render microservice (hardcoded - verified working endpoint)
 export const MANIM_API_URL = "https://foldex-renderer-777822234917.us-central1.run.app";
 
 const MAX_ATTEMPTS = 4;
+const VISUAL_REPAIR_ATTEMPTS = 2;
 const RENDER_TIMEOUT_MS = 30 * 60 * 1000;
+// Scenes are coded in parallel; this caps concurrent requests to the model API.
+const CODER_CONCURRENCY = 3;
+// Frame review after rendering; set VIDEO_VISUAL_QA=off to skip it.
+const VISUAL_QA = process.env.VIDEO_VISUAL_QA !== "off";
 
 export interface PipelineInput {
   prompt: string;
@@ -37,7 +57,14 @@ export interface PipelineTrace {
   // Per attempt: what prepareCode fixed or flagged before rendering.
   prepare: { fixes: string[]; warnings: string[]; errors: string[]; sync: SyncStats }[];
   renderErrors: string[];
+  repairs: { reason: "validation" | "syntax" | "render" | "visual"; scenes: number[] }[];
   attempts: number;
+  visual?: {
+    outcome: "clean" | "improved" | "kept-original" | "repair-failed" | "review-failed";
+    framesChecked: number;
+    issues: VisualIssue[];
+    issuesAfterRepair?: VisualIssue[];
+  };
 }
 
 export type PipelineResult =
@@ -57,10 +84,11 @@ export type PipelineResult =
 
 export async function runVideoPipeline(log: Log, input: PipelineInput): Promise<PipelineResult> {
   const { prompt, context } = input;
-  const trace: PipelineTrace = { sourcesCount: 0, skills: [], prepare: [], renderErrors: [], attempts: 0 };
+  const trace: PipelineTrace = { sourcesCount: 0, skills: [], prepare: [], renderErrors: [], repairs: [], attempts: 0 };
 
   // ═══════════════════════════════════════
-  // Step 1: Smart Search — Extract a clean, factual query from the raw prompt
+  // Step 1: Research — a clean search query, web/Wikipedia sources, and a
+  // condensed version of very large attached documents.
   // ═══════════════════════════════════════
   const searchAnalysis = await generateJson(
     log,
@@ -85,29 +113,24 @@ export async function runVideoPipeline(log: Log, input: PipelineInput): Promise<
   trace.sourcesCount = sources.length;
 
   // ═══════════════════════════════════════
-  // Step 2: Director Agent — Digest ALL raw context into a structured script.
-  // This prevents context overflow when users attach large PDFs.
+  // Step 2: Director — digest everything into a scene-by-scene script.
+  // Each scene is a list of beats (SAY + SHOW).
   // ═══════════════════════════════════════
-  const directorScript = await generateJson(
+  const director = await generateParsed(
     log,
     QWEN_MAX,
-    z.object({
-      script: z.string().describe("The complete structured production script"),
-      estimatedDuration: z.string().describe("Estimated video duration"),
-      sceneCount: z.number().describe("Number of scenes in the script"),
-      title: z.string().describe("Suggested video title"),
-    }),
     DIRECTOR_SYSTEM,
     buildDirectorPrompt(prompt, searchContent, documentContext),
+    parseDirectorScript,
   );
-  trace.directorScript = directorScript.script;
-  trace.estimatedDuration = directorScript.estimatedDuration;
-  trace.sceneCount = directorScript.sceneCount;
+  trace.directorScript = director.script;
+  trace.estimatedDuration = director.duration;
+  trace.sceneCount = director.scenes.length;
   log.info("Director script generated", {
-    estimatedDuration: directorScript.estimatedDuration,
-    sceneCount: directorScript.sceneCount,
-    scriptLength: directorScript.script.length,
-    title: directorScript.title,
+    title: director.title,
+    duration: director.duration,
+    scenes: director.scenes.map((s) => s.heading),
+    scriptLength: director.script.length,
   });
 
   // ═══════════════════════════════════════
@@ -125,7 +148,7 @@ export async function runVideoPipeline(log: Log, input: PipelineInput): Promise<
         reasoning: z.string().describe("Why these skills were chosen"),
       }),
       SKILL_SELECTOR_SYSTEM,
-      buildSkillSelectorPrompt(directorScript.script, formatManifestForSelector(skillManifest)),
+      buildSkillSelectorPrompt(director.script, formatManifestForSelector(skillManifest)),
     );
     trace.skills = skillSelection.selectedSkills;
     log.info("Skills selected", {
@@ -137,98 +160,154 @@ export async function runVideoPipeline(log: Log, input: PipelineInput): Promise<
   }
 
   // ═══════════════════════════════════════
-  // Step 4: Generate Manim Code
-  // The code generator sees ONLY the rules, the selected skills and the
-  // Director's script — never the raw PDF context or search results.
-  // The code comes back as plain text in a fenced block, not inside JSON, so it
-  // needs no extra layer of escaping.
+  // Step 4: Code each scene
+  // One short model call per scene, in parallel. Short answers avoid the
+  // provider cutting long streams, and each scene gets the model's full focus.
+  // The coder sees ONLY the rules, the selected skills and the script.
   // ═══════════════════════════════════════
-  const coderPrompt = buildCoderPrompt(directorScript.script, skillContent);
-  log.info("Code generation prompt size", {
-    systemChars: CODER_SYSTEM.length,
-    skillChars: skillContent.length,
-    directorScriptChars: directorScript.script.length,
+  const scenes = director.scenes;
+  const bodies = await mapLimit(scenes, CODER_CONCURRENCY, async (scene) => {
+    const body = await generateParsed(
+      log,
+      QWEN_MAX,
+      CODER_SYSTEM,
+      buildScenePrompt(director.script, scene.text, scene.number, scenes.length, skillContent),
+      parseSceneBody,
+    );
+    log.info(`Scene ${scene.number} coded`, { lines: body.split("\n").length });
+    return body;
   });
 
-  const output = await generateParsed(log, QWEN_MAX, CODER_SYSTEM, coderPrompt, parseCodeResponse);
-  log.info("LLM generated code", { sceneName: output.sceneName, code: output.code });
-
   // ═══════════════════════════════════════
-  // Step 5: Prepare, render, and repair
-  // Every attempt first runs the deterministic fixes (voiceover sync, LaTeX,
-  // characters). Structural problems go straight to repair without a render.
+  // Step 5: Assemble, prepare, render, and repair scene by scene
   // ═══════════════════════════════════════
-  let current = { code: output.code, sceneName: output.sceneName };
+  const ctx: RenderContext = { log, trace, skillContent, scenes };
+  const first = await renderWithRepairs(ctx, bodies, MAX_ATTEMPTS, "render");
+  trace.attempts = first.attempts;
 
-  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
-    trace.attempts = attempt;
-    const prepared = prepareCode(current.code, current.sceneName);
-    trace.prepare.push({ fixes: prepared.fixes, warnings: prepared.warnings, errors: prepared.errors, sync: prepared.sync });
-    log.info("Prepared code", { fixes: prepared.fixes, warnings: prepared.warnings, errors: prepared.errors });
-
-    let failure: string;
-    if (prepared.errors.length) {
-      failure = `The file failed validation before rendering:\n- ${prepared.errors.join("\n- ")}`;
-    } else {
-      log.info(`Rendering attempt ${attempt}/${MAX_ATTEMPTS}`);
-      const render = await renderVideo(current.sceneName, prepared.code);
-      if (render.ok) {
-        log.info(`Video generated successfully on attempt ${attempt}`);
-        return {
-          ok: true,
-          videoUrl: render.data.video_url,
-          fileSize: render.data.file_size,
-          thumbnailUrl: render.data.thumbnail_url,
-          title: output.title,
-          description: output.description,
-          transcript: extractTranscript(prepared.code),
-          sources,
-          code: prepared.code,
-          trace,
-        };
-      }
-      failure = render.error;
-    }
-
-    trace.renderErrors.push(failure);
-    log.error(`Attempt ${attempt} failed`, { error: failure });
-
-    if (attempt >= MAX_ATTEMPTS) {
-      log.error(`All ${MAX_ATTEMPTS} attempts exhausted`);
-      break;
-    }
-
-    // Repair from the model's own code (before our fixes) so it sees what it wrote.
-    log.info(`Asking Qwen to fix the code (attempt ${attempt + 1})`);
-    try {
-      const fixed = await generateParsed(
-        log,
-        QWEN_MAX,
-        CODER_SYSTEM,
-        `${skillContent}\n\n${buildRepairPrompt(failure, directorScript.script, current.code)}`,
-        parseCodeResponse,
-      );
-      current = { code: fixed.code, sceneName: fixed.sceneName };
-      log.info("Fix applied", { sceneName: fixed.sceneName });
-    } catch (fixError) {
-      log.error("Failed to generate fix", { error: String(fixError) });
-      break;
-    }
+  if (!first.ok) {
+    return {
+      ok: false,
+      error: `Failed to generate video after ${first.attempts} attempts. Last error: ${first.error.slice(-300)}`,
+      code: first.code,
+      trace,
+    };
   }
 
-  const lastError = trace.renderErrors.at(-1) ?? "unknown error";
+  // ═══════════════════════════════════════
+  // Step 6: Visual review
+  // Sample frames, look for layout problems, and if there are serious ones
+  // repair the scenes involved once. Whichever video has fewer serious
+  // problems is kept, so a good first render is never lost.
+  // ═══════════════════════════════════════
+  const best = VISUAL_QA ? await reviewAndImprove(ctx, first) : first;
+
   return {
-    ok: false,
-    error: `Failed to generate video after ${MAX_ATTEMPTS} attempts. Last error: ${lastError.substring(0, 200)}`,
-    code: current.code,
+    ok: true,
+    videoUrl: best.render.video_url,
+    fileSize: best.render.file_size,
+    thumbnailUrl: best.render.thumbnail_url,
+    title: director.title,
+    description: director.description,
+    transcript: extractTranscript(best.code),
+    sources,
+    code: best.code,
     trace,
   };
+}
+
+// ─── rendering ────────────────────────────────────────
+
+interface RenderContext {
+  log: Log;
+  trace: PipelineTrace;
+  skillContent: string;
+  scenes: ScriptScene[];
 }
 
 interface RenderData {
   video_url: string;
   file_size: number;
   thumbnail_url: string;
+}
+
+type Rendered = { ok: true; render: RenderData; bodies: string[]; code: string; attempts: number };
+type RenderFailure = { ok: false; error: string; code: string; attempts: number };
+
+async function renderWithRepairs(
+  ctx: RenderContext,
+  startBodies: string[],
+  maxAttempts: number,
+  firstReason: "render" | "visual",
+): Promise<Rendered | RenderFailure> {
+  const { log, trace, scenes } = ctx;
+  let bodies = [...startBodies];
+  let failure = "unknown error";
+  let code = "";
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    const file = assembleFile(scenes, bodies);
+    const prepared = prepareCode(file.code, SCENE_CLASS);
+    code = prepared.code;
+    trace.prepare.push({ fixes: prepared.fixes, warnings: prepared.warnings, errors: prepared.errors, sync: prepared.sync });
+    log.info("Prepared code", { fixes: prepared.fixes, warnings: prepared.warnings, errors: prepared.errors });
+
+    let line: number | undefined;
+    let reason: "validation" | "syntax" | "render";
+    const syntax = prepared.errors.length ? null : await checkSyntax(prepared.code);
+    if (prepared.errors.length) {
+      reason = "validation";
+      failure = `The file failed validation before rendering:\n- ${prepared.errors.join("\n- ")}`;
+    } else if (syntax && !syntax.ok) {
+      reason = "syntax";
+      failure = syntax.message;
+      line = syntax.line;
+    } else {
+      reason = "render";
+      log.info(`Rendering attempt ${attempt}/${maxAttempts}`);
+      const render = await renderVideo(SCENE_CLASS, prepared.code);
+      if (render.ok) {
+        log.info(`Video rendered on attempt ${attempt}`, { url: render.data.video_url });
+        return { ok: true, render: render.data, bodies, code: prepared.code, attempts: attempt };
+      }
+      failure = render.error;
+      line = errorLine(failure);
+    }
+
+    trace.renderErrors.push(failure);
+    log.error(`Attempt ${attempt} failed`, { reason, line, error: failure.slice(-1500) });
+    if (attempt >= maxAttempts) break;
+
+    // Repair only the scene the error points at; if it can't be located,
+    // let every scene check itself against the error.
+    const culprit = (line !== undefined ? sceneForLine(file.ranges, line) : undefined) ?? sceneForText(bodies, failure);
+    const targets = culprit ? [culprit] : scenes.map((s) => s.number);
+    trace.repairs.push({ reason, scenes: targets });
+    log.info("Repairing scenes", { scenes: targets, line });
+
+    try {
+      const error = failure.slice(-3000); // tracebacks end with the useful part
+      const repaired = await mapLimit(targets, CODER_CONCURRENCY, (n) => {
+        const range = file.ranges[n - 1];
+        const lineInBody = culprit === n && line !== undefined ? line - range.firstLine + 1 : undefined;
+        const shown = lineInBody ? markLine(bodies[n - 1], lineInBody) : bodies[n - 1];
+        return generateParsed(
+          log,
+          QWEN_MAX,
+          CODER_SYSTEM,
+          buildSceneRepairPrompt(error, scenes[n - 1].text, shown, ctx.skillContent),
+          (text) => parseSceneBody(text).replace(/\s*# <-- ERROR HERE/g, ""),
+        );
+      });
+      targets.forEach((n, i) => (bodies[n - 1] = repaired[i]));
+    } catch (e) {
+      log.error("Scene repair failed", { error: String(e) });
+      break;
+    }
+  }
+
+  log.error(`Rendering gave up after ${maxAttempts} attempts (${firstReason})`);
+  return { ok: false, error: failure, code, attempts: maxAttempts };
 }
 
 async function renderVideo(
@@ -247,4 +326,92 @@ async function renderVideo(
   } catch (e) {
     return { ok: false, error: `Render request failed: ${e instanceof Error ? e.message : String(e)}` };
   }
+}
+
+// ─── visual review ────────────────────────────────────
+
+async function safeReview(log: Log, url: string): Promise<VisualReview | null> {
+  try {
+    return await reviewVideo(log, url);
+  } catch (e) {
+    log.warn("Visual review failed; keeping the video as rendered", { error: String(e) });
+    return null;
+  }
+}
+
+async function reviewAndImprove(ctx: RenderContext, first: Rendered): Promise<Rendered> {
+  const { log, trace, scenes } = ctx;
+  const review = await safeReview(log, first.render.video_url);
+  if (!review) {
+    trace.visual = { outcome: "review-failed", framesChecked: 0, issues: [] };
+    return first;
+  }
+  trace.visual = { outcome: "clean", framesChecked: review.framesChecked, issues: review.issues };
+  const serious = highIssues(review);
+  if (!serious.length) return first;
+
+  // Group the problems by scene.
+  const times = estimateSceneTimes(first.bodies);
+  const byScene = new Map<number, VisualIssue[]>();
+  for (const issue of serious) {
+    const n = sceneForIssue(first.bodies, times, issue.problem, issue.time, review.duration);
+    byScene.set(n, [...(byScene.get(n) ?? []), issue]);
+  }
+  const targets = [...byScene.keys()].sort((a, b) => a - b);
+  trace.repairs.push({ reason: "visual", scenes: targets });
+  log.info("Repairing visual problems", { count: serious.length, scenes: targets });
+
+  let second: Rendered | RenderFailure;
+  try {
+    const repaired = await mapLimit(targets, CODER_CONCURRENCY, (n) => {
+      const problems = byScene
+        .get(n)!
+        .map((i) => `- at ${formatTime(i.time)}: ${i.problem}`)
+        .join("\n");
+      return generateParsed(
+        log,
+        QWEN_MAX,
+        CODER_SYSTEM,
+        buildSceneVisualRepairPrompt(problems, scenes[n - 1].text, first.bodies[n - 1], ctx.skillContent),
+        parseSceneBody,
+      );
+    });
+    const bodies = [...first.bodies];
+    targets.forEach((n, i) => (bodies[n - 1] = repaired[i]));
+    second = await renderWithRepairs(ctx, bodies, VISUAL_REPAIR_ATTEMPTS, "visual");
+  } catch (e) {
+    log.warn("Visual repair failed", { error: String(e) });
+    trace.visual.outcome = "repair-failed";
+    return first;
+  }
+  if (!second.ok) {
+    trace.visual.outcome = "repair-failed";
+    return first;
+  }
+
+  const secondReview = await safeReview(log, second.render.video_url);
+  trace.visual.issuesAfterRepair = secondReview?.issues;
+  if (secondReview && highIssues(secondReview).length < serious.length) {
+    trace.visual.outcome = "improved";
+    return second;
+  }
+  trace.visual.outcome = "kept-original";
+  return first;
+}
+
+// ─── utils ────────────────────────────────────────────
+
+// Promise.all with at most `limit` tasks running at once; keeps result order.
+async function mapLimit<T, R>(items: T[], limit: number, fn: (item: T, index: number) => Promise<R>): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let next = 0;
+  await Promise.all(
+    Array.from({ length: Math.min(limit, items.length) }, async () => {
+      while (next < items.length) {
+        const i = next++;
+        results[i] = await fn(items[i], i);
+      }
+    }),
+  );
+  return results;
 }

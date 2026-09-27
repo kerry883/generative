@@ -52,7 +52,11 @@ LENGTH
 ${LENGTH_POLICY}
 The estimated duration must match the narration word count.
 
-SCRIPT FORMAT (use exactly)
+RESPONSE FORMAT (plain text, use exactly; no JSON, no markdown fences)
+TITLE: <video title, at most 60 characters>
+DESCRIPTION: <one sentence describing the video>
+DURATION: <estimated total length, e.g. 150 s>
+
 SCENE 1: <name> (~<seconds> s)
 BEAT 1.1
 SAY: <narration, 1-2 sentences>
@@ -75,7 +79,7 @@ ${searchContent || "No search results available."}
 ${context || "No additional context provided."}
 
 ## YOUR TASK:
-Transform ALL of the above into a detailed production script in the required scene and beat format.
+Transform ALL of the above into a detailed production script in the required response format.
 Extract all relevant facts, formulas, and content from the context.
 The code writer will ONLY see your script — they won't have access to the raw context.`;
 }
@@ -100,51 +104,30 @@ export function buildSkillSelectorPrompt(script: string, manifestText: string): 
 
 // ─── coder ────────────────────────────────────────────
 
-export const GENERATION_PROMPT = String.raw`You are VideoSage. You turn a production script into one complete, working Manim Community Edition file with narration that is timed to the animations.
+export const GENERATION_PROMPT = String.raw`You are VideoSage. You write Manim Community Edition code for ONE scene of an educational video, with narration that is timed to the animations.
 
-== 1. FILE STRUCTURE (copy exactly) ==
+== 1. WHAT YOU WRITE ==
+The pipeline builds the file around your code. It already contains the imports (from manim import *), the scene class (VoiceoverScene + MovingCameraScene), the speech service, and camera setup. Your scene body is placed inside construct(), after the previous scene, and the pipeline fades out everything and resets the camera after your scene ends.
+
+Write ONLY the scene body, at indentation level 0, using self as usual. Example for a scene with two beats:
 ~~~python
-from manim import *
-from manim_voiceover import VoiceoverScene
-import sys
-import os
+# BEAT 1.1
+with self.voiceover(text="""Welcome. Today we derive the quadratic formula.""") as tracker:
+    title = Text("The Quadratic Formula", font_size=48, color=BLUE)
+    title.to_edge(UP, buff=0.8)
+    self.play(Write(title), run_time=tracker.duration * 0.6)
+    self.play(Indicate(title), run_time=tracker.duration * 0.4)
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from custom_google_tts import CustomGoogleService
-
-
-class QuadraticFormula(VoiceoverScene, MovingCameraScene):
-    def construct(self):
-        MovingCameraScene.setup(self)
-        self.set_speech_service(
-            CustomGoogleService(
-                voice="en-US-Chirp3-HD-Aoede",
-                language_code="en-US",
-                speaking_rate=0.90,
-            )
-        )
-
-        # SCENE 1: Introduction
-        # BEAT 1.1
-        with self.voiceover(text="""Welcome. Today we derive the quadratic formula.""") as tracker:
-            title = Text("The Quadratic Formula", font_size=48, color=BLUE)
-            title.to_edge(UP, buff=0.8)
-            self.play(Write(title), run_time=tracker.duration * 0.6)
-            self.play(Indicate(title), run_time=tracker.duration * 0.4)
-
-        # BEAT 1.2
-        with self.voiceover(text="""It solves every equation of the form a x squared plus b x plus c equals zero.""") as tracker:
-            equation = MathTex(r"ax^2 + bx + c = 0", font_size=48)
-            self.play(Write(equation), run_time=tracker.duration * 0.7)
-            self.play(Circumscribe(equation), run_time=tracker.duration * 0.3)
-
-        self.play(FadeOut(title), FadeOut(equation), run_time=0.8)
-
-        # SCENE 2: ...
+# BEAT 1.2
+with self.voiceover(text="""It solves every equation of the form a x squared plus b x plus c equals zero.""") as tracker:
+    equation = MathTex(r"ax^2 + bx + c = 0", font_size=48)
+    equation.next_to(title, DOWN, buff=1)
+    self.play(Write(equation), run_time=tracker.duration * 0.7)
+    self.play(Circumscribe(equation), run_time=tracker.duration * 0.3)
 ~~~
-- Implement EVERY scene and EVERY beat of the script, in order, inside the single construct() method.
-- Keep the imports, the class bases, MovingCameraScene.setup(self) and the speech service exactly as shown.
-- Helper methods may build and return mobjects, but must never call self.play or self.wait.
+- Implement EVERY beat of your scene, in order. Each scene starts on an empty screen.
+- Do not write imports, a class, def construct, the speech service or camera setup.
+- Do not define functions that call self.play or self.wait. Small local helper functions that only build mobjects are fine.
 
 == 2. VOICEOVER TIMING (most important) ==
 A block's narration audio starts when the block starts, and its length is tracker.duration.
@@ -169,8 +152,8 @@ The frame is 14.2 units wide (x from -7.1 to 7.1) and 8 units tall (y from -4 to
 - Position with .to_edge(), .to_corner(), .next_to(other, direction, buff=0.3 or more) and .arrange(). Avoid .shift() by more than 4 and avoid hard-coded coordinates.
 - Diagrams with 3 or more parts: build the parts, put them in a VGroup, then call .scale_to_fit_width(11) and .move_to(ORIGIN) on the group.
 - Text inside a shape: label.scale_to_fit_width(box.width * 0.85), then label.move_to(box).
-- FadeOut the previous scene's content before starting a new scene so nothing overlaps.
-- Zooming: fade out labels first, then self.play(self.camera.frame.animate.scale(0.5).move_to(target), run_time=tracker.duration * 0.4). Zoom back out before the next scene.
+- Within your scene, FadeOut content that is no longer needed before new content takes its place, so nothing overlaps.
+- Zooming: fade out labels first, then self.play(self.camera.frame.animate.scale(0.5).move_to(target), run_time=tracker.duration * 0.4).
 
 == 5. MANIM API PITFALLS ==
 - Brace labels: create a Text or MathTex and place it with .next_to(brace, brace.direction, buff=0.2). Do not pass font_size to brace.get_text().
@@ -186,48 +169,74 @@ The frame is 14.2 units wide (x from -7.1 to 7.1) and 8 units tall (y from -4 to
 - Keep the picture moving: every sentence comes with a visible change.
 
 == 7. LENGTH ==
-${LENGTH_POLICY}
-Follow the durations in the production script.`;
+Follow the scene's durations and narration from the production script. Use the SAY text as the narration, adjusted only so it reads naturally aloud.`;
 
-export const CODE_RESPONSE_FORMAT = `Respond in exactly this format and nothing else:
-TITLE: <video title, at most 60 characters>
-DESCRIPTION: <one sentence describing the video>
-SCENE_NAME: <the Python class name of the scene>
+export const SCENE_RESPONSE_FORMAT = `Respond with only the scene body in one fenced block and nothing else:
 \`\`\`python
-<the complete Python file>
+<the scene body>
 \`\`\``;
 
-export const CODER_SYSTEM = `${GENERATION_PROMPT}\n\n${CODE_RESPONSE_FORMAT}`;
+export const CODER_SYSTEM = `${GENERATION_PROMPT}\n\n${SCENE_RESPONSE_FORMAT}`;
 
-export function buildCoderPrompt(script: string, skillContent: string): string {
+export function buildScenePrompt(
+  script: string,
+  sceneText: string,
+  sceneNumber: number,
+  sceneCount: number,
+  skillContent: string,
+): string {
   return `${skillContent}
 
-PRODUCTION SCRIPT (implement every scene and every beat, in order; each BEAT becomes one voiceover block):
-${script}`;
+FULL PRODUCTION SCRIPT (for context only; other scenes are written separately):
+${script}
+
+========================================
+YOUR TASK: write the code for SCENE ${sceneNumber} of ${sceneCount}. Each BEAT becomes one voiceover block.
+${sceneText}`;
 }
 
 // ─── repair ───────────────────────────────────────────
 
-export function buildRepairPrompt(error: string, script: string, code: string): string {
-  return String.raw`The Manim file below failed. Fix it.
+export function buildSceneRepairPrompt(error: string, sceneText: string, markedCode: string, skillContent: string): string {
+  return `${skillContent}\n\n` + String.raw`The code for this scene failed when the video was rendered. Fix it.
 
 ERROR:
 ----------------------------------------
 ${error}
 ----------------------------------------
 
-PRODUCTION SCRIPT (what the video must show):
-${script}
+SCENE SCRIPT (what the scene must show):
+${sceneText}
 
-CURRENT CODE:
+CURRENT SCENE CODE (the failing line is marked "# <-- ERROR HERE" when it is known):
+~~~python
+${markedCode}
+~~~
+
+Instructions:
+1. Find the cause of the error and fix it. Also fix any other line that breaks the rules in the system prompt.
+2. Keep everything else the same: every voiceover block, the narration text, the layout and the timing. Do not shorten or simplify the scene.
+3. If the error names an attribute or method that does not exist, replace it with a documented Manim alternative.
+4. If this scene may not be the cause (no line is marked), only change code that could plausibly produce this error, and otherwise return the code unchanged.
+5. Remove the "# <-- ERROR HERE" marker and return the complete scene body in the required format.`;
+}
+
+export function buildSceneVisualRepairPrompt(problems: string, sceneText: string, code: string, skillContent: string): string {
+  return `${skillContent}\n\n` + String.raw`This scene rendered, but a frame-by-frame review of the video found these layout problems in it:
+
+${problems}
+
+SCENE SCRIPT (what the scene must show):
+${sceneText}
+
+CURRENT SCENE CODE:
 ~~~python
 ${code}
 ~~~
 
 Instructions:
-1. Find the line that causes the error and fix the root cause. Also fix any other line that breaks the rules in the system prompt.
-2. Keep everything else the same: every scene, every voiceover block, the narration text, the layout and the timing. Do not shorten or simplify the video.
-3. If the error names an attribute or method that does not exist, replace it with a documented Manim alternative.
-4. If the error is "'Camera' object has no attribute 'frame'", the class must be declared as class SceneName(VoiceoverScene, MovingCameraScene) and construct() must call MovingCameraScene.setup(self).
-5. Return the complete file in the required response format.`;
+1. Use the visible text named in each problem to find the objects involved.
+2. Fix each problem with the layout rules from the system prompt: scale_to_fit_width, next_to with enough buff, arrange, grouping and scaling diagrams, FadeOut of old content before new content takes its place, raw-string LaTeX.
+3. Change only what is needed. Keep every voiceover block, the narration text and the timing.
+4. Return the complete scene body in the required format.`;
 }

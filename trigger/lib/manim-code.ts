@@ -1,5 +1,4 @@
 // Static helpers for the Manim code the model generates:
-//   - parseCodeResponse: read the coder's plain-text answer (metadata + fenced code)
 //   - prepareCode: deterministic fixes applied before every render
 //       * voiceover sync: fit each narration block's animations to its audio length
 //       * silent gaps between narration blocks are clamped
@@ -9,45 +8,10 @@
 //
 // This is a small purpose-built scanner, not a Python parser. Anything it can't
 // analyse safely (loops, conditionals, helper methods that animate) is left as
-// written and reported as a warning.
+// written and reported as a warning. All fixes keep the line count unchanged, so
+// error line numbers still point at the right scene.
 
-// ─── coder response ───────────────────────────────────
-
-export interface CodeResponse {
-  title: string;
-  description: string;
-  sceneName: string;
-  code: string;
-}
-
-export function parseCodeResponse(text: string): CodeResponse {
-  const field = (name: string) => text.match(new RegExp(`^\\s*${name}\\s*:\\s*(.+)$`, "mi"))?.[1].trim();
-
-  let code: string | undefined;
-  const fence = text.match(/```(?:python|py)?[ \t]*\r?\n([\s\S]*?)```/i);
-  if (fence) code = fence[1];
-  else {
-    const start = text.search(/^from manim import/m);
-    if (start !== -1) code = text.slice(start);
-  }
-  if (!code || !/class\s+\w+\s*\(/.test(code)) {
-    throw new Error("No Manim code found. Put the complete code in one ```python fenced block.");
-  }
-  code = code.replace(/\s+$/, "") + "\n";
-
-  const declared = field("SCENE_NAME")?.replace(/[^A-Za-z0-9_]/g, "");
-  const defined = [...code.matchAll(/^class\s+([A-Za-z_]\w*)\s*\(([^)]*)\)/gm)];
-  const voiceScene = defined.find((m) => m[2].includes("VoiceoverScene"));
-  const sceneName =
-    declared && defined.some((m) => m[1] === declared) ? declared : (voiceScene ?? defined[0])[1];
-
-  return {
-    title: field("TITLE") ?? sceneName,
-    description: field("DESCRIPTION") ?? "",
-    sceneName,
-    code,
-  };
-}
+import { execFile } from "node:child_process";
 
 // ─── Python scanning ──────────────────────────────────
 
@@ -461,6 +425,33 @@ export function prepareCode(input: string, sceneName: string): PreparedCode {
   if (s.blocks === 0) errors.push("there are no `with self.voiceover(...)` blocks, so the video would have no narration");
 
   return { code, fixes, warnings, errors, sync: s };
+}
+
+// ─── syntax check ─────────────────────────────────────
+
+const PYTHON = process.env.PYTHON_PATH ?? (process.platform === "win32" ? "python" : "python3");
+
+const SYNTAX_CHECK = `import ast, sys
+try:
+    ast.parse(sys.stdin.read())
+except SyntaxError as e:
+    print(e.lineno or 0)
+    print(e.msg)
+    sys.exit(1)
+`;
+
+// Parses the code with the local Python, if there is one. Returns null when no
+// Python is available, so callers simply skip the check.
+export function checkSyntax(code: string): Promise<{ ok: true } | { ok: false; line?: number; message: string } | null> {
+  return new Promise((resolve) => {
+    const child = execFile(PYTHON, ["-c", SYNTAX_CHECK], { timeout: 30_000 }, (err, stdout) => {
+      if (!err) return resolve({ ok: true });
+      if ((err as NodeJS.ErrnoException).code === "ENOENT" || !stdout.trim()) return resolve(null);
+      const [line, ...msg] = stdout.trim().split(/\r?\n/);
+      resolve({ ok: false, line: Number(line) || undefined, message: `SyntaxError: ${msg.join(" ")} (line ${line})` });
+    });
+    child.stdin?.end(code);
+  });
 }
 
 // ─── transcript ───────────────────────────────────────
