@@ -95,6 +95,9 @@ export async function runVideoPipeline(log: Log, input: PipelineInput): Promise<
     QWEN_PLUS,
     z.object({
       searchQuery: z.string().describe("Clean, factual search query focused on the educational topic"),
+      encyclopediaTopics: z
+        .array(z.string())
+        .describe("1-3 encyclopedia article titles for the core topics, 1-4 words each, e.g. ['Derivative', 'Tangent line']"),
       reasoning: z.string().describe("Brief explanation of why this query was chosen"),
     }),
     SEARCH_QUERY_SYSTEM,
@@ -103,11 +106,12 @@ export async function runVideoPipeline(log: Log, input: PipelineInput): Promise<
   trace.searchQuery = searchAnalysis.searchQuery;
   log.info("Smart search analysis", {
     extractedQuery: searchAnalysis.searchQuery,
+    encyclopediaTopics: searchAnalysis.encyclopediaTopics,
     reasoning: searchAnalysis.reasoning,
   });
 
   const [{ content: searchContent, sources }, documentContext] = await Promise.all([
-    searchTopic(log, searchAnalysis.searchQuery),
+    searchTopic(log, searchAnalysis.searchQuery, searchAnalysis.encyclopediaTopics),
     condenseContext(log, prompt, context),
   ]);
   trace.sourcesCount = sources.length;

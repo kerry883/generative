@@ -77,38 +77,46 @@ async function readPage(log: Log, source: Source): Promise<Page> {
 
 // ─── Wikipedia (no key needed) ────────────────────────
 
-async function wikipediaSearch(log: Log, query: string): Promise<Page[]> {
-  const api = "https://en.wikipedia.org/w/api.php";
-  const headers = { "User-Agent": USER_AGENT };
-  const search = await fetch(
-    `${api}?action=query&list=search&format=json&srlimit=${PAGES_TO_READ}&srsearch=${encodeURIComponent(query)}`,
-    { headers, signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) },
-  );
-  if (!search.ok) {
-    log.warn("Wikipedia search failed", { status: search.status });
-    return [];
-  }
-  const hits: { title: string; snippet: string }[] = (await search.json()).query?.search ?? [];
-  if (!hits.length) return [];
+const WIKIPEDIA_API = "https://en.wikipedia.org/w/api.php";
+// Wikimedia asks API clients to identify themselves with contact details:
+// set WIKIPEDIA_USER_AGENT to e.g. "AppName/1.0 (https://your.site; you@example.com)".
+const WIKIPEDIA_USER_AGENT = process.env.WIKIPEDIA_USER_AGENT ?? USER_AGENT;
 
-  // Full-text extracts are limited to one title per request.
-  const pages = await Promise.all(
-    hits.map(async (hit) => {
-      const res = await fetch(
-        `${api}?action=query&prop=extracts&explaintext=1&format=json&redirects=1&titles=${encodeURIComponent(hit.title)}`,
-        { headers, signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) },
-      ).catch(() => null);
-      const pages: Record<string, { extract?: string }> = res?.ok ? ((await res.json()).query?.pages ?? {}) : {};
-      const text = (Object.values(pages)[0]?.extract ?? "").replace(/\n{2,}/g, "\n").trim();
-      return {
-        title: `${hit.title} - Wikipedia`,
-        url: `https://en.wikipedia.org/wiki/${encodeURIComponent(hit.title.replace(/ /g, "_"))}`,
-        snippet: htmlToText(hit.snippet),
-        text: text.slice(0, CHARS_PER_PAGE),
-      };
-    }),
-  );
-  return pages.filter((p) => p.text.length > 0);
+// Best-matching article for a short topic, with its plain-text content, in a
+// single request (search generator + extracts).
+async function wikipediaArticle(log: Log, topic: string): Promise<Page | null> {
+  const url =
+    `${WIKIPEDIA_API}?action=query&format=json&redirects=1&generator=search&gsrlimit=1` +
+    `&gsrsearch=${encodeURIComponent(topic)}&prop=extracts&explaintext=1`;
+  const res = await fetch(url, {
+    headers: { "User-Agent": WIKIPEDIA_USER_AGENT },
+    signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+  });
+  if (!res.ok) {
+    log.warn("Wikipedia request failed", { topic, status: res.status });
+    return null;
+  }
+  const pages: Record<string, { title: string; extract?: string }> = (await res.json()).query?.pages ?? {};
+  const page = Object.values(pages)[0];
+  const text = (page?.extract ?? "").replace(/\n{2,}/g, "\n").trim();
+  if (!page || !text) return null;
+  return {
+    title: `${page.title} - Wikipedia`,
+    url: `https://en.wikipedia.org/wiki/${encodeURIComponent(page.title.replace(/ /g, "_"))}`,
+    snippet: text.slice(0, 200),
+    text: text.slice(0, CHARS_PER_PAGE),
+  };
+}
+
+// Short topic titles find the right article far more reliably than a long
+// query. Requests go one at a time to stay well inside Wikimedia's limits.
+async function wikipediaSearch(log: Log, query: string, topics: string[]): Promise<Page[]> {
+  const pages: Page[] = [];
+  for (const topic of (topics.length ? topics : [query]).slice(0, PAGES_TO_READ)) {
+    const page = await wikipediaArticle(log, topic);
+    if (page && !pages.some((p) => p.url === page.url)) pages.push(page);
+  }
+  return pages;
 }
 
 // ─── public API ───────────────────────────────────────
@@ -118,6 +126,7 @@ async function wikipediaSearch(log: Log, query: string): Promise<Page[]> {
 export async function searchTopic(
   log: Log,
   query: string,
+  encyclopediaTopics: string[] = [],
 ): Promise<{ content: string; sources: Source[] }> {
   log.info("Searching for topic information", { query });
   let pages: Page[] = [];
@@ -135,7 +144,7 @@ export async function searchTopic(
 
   if (!pages.length) {
     try {
-      pages = await wikipediaSearch(log, query);
+      pages = await wikipediaSearch(log, query, encyclopediaTopics);
       if (pages.length) log.info("Using Wikipedia research", { titles: pages.map((p) => p.title) });
     } catch (e) {
       log.warn("Wikipedia search error", { error: String(e) });
