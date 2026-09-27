@@ -12,7 +12,8 @@ import { generateJson, QWEN_VISION, type Log } from "./llm";
 const FFMPEG = process.env.FFMPEG_PATH ?? "ffmpeg";
 const FFPROBE = process.env.FFPROBE_PATH ?? "ffprobe";
 
-const FRAMES_PER_CALL = 8;
+const PAIRS_PER_CALL = 4;
+const PAIR_GAP_SECONDS = 1;
 const MIN_FRAMES = 6;
 const MAX_FRAMES = 24;
 const SECONDS_PER_FRAME = 6;
@@ -40,7 +41,7 @@ function exec(cmd: string, args: string[]): Promise<string> {
 const reviewSchema = z.object({
   issues: z.array(
     z.object({
-      frame: z.number().describe("The frame number as labeled"),
+      frame: z.number().describe("The pair number N (for frames Na and Nb)"),
       problem: z.string().describe("What is wrong and where on screen, naming the visible text or object"),
       severity: z.enum(["high", "low"]),
     }),
@@ -48,6 +49,8 @@ const reviewSchema = z.object({
 });
 
 const REVIEW_SYSTEM = `You review frames from an educational animation (Manim, black background) for layout defects a viewer would notice.
+
+Frames come in pairs: "Na" and "Nb", taken one second apart. Report a problem only if it is visible in BOTH images of the pair. Anything visible in only one of them is an animation in progress (text being written, a shape being drawn, something fading or moving) and is not a problem.
 
 Report only these problems:
 - text or formulas overlapping other text, formulas or shapes
@@ -80,23 +83,30 @@ export async function reviewVideo(log: Log, videoUrl: string): Promise<VisualRev
     const count = Math.min(MAX_FRAMES, Math.max(MIN_FRAMES, Math.round(duration / SECONDS_PER_FRAME)));
     const times = Array.from({ length: count }, (_, i) => ((i + 0.5) * duration) / count);
 
-    const frames: { time: number; data: Uint8Array }[] = [];
-    for (const [i, t] of times.entries()) {
-      const file = join(dir, `frame_${i}.jpg`);
+    // Each sample is a pair of frames one second apart: a real layout problem is
+    // visible in both, while something caught mid-animation is not.
+    const grab = async (t: number, file: string) => {
       await exec(FFMPEG, ["-v", "error", "-ss", t.toFixed(2), "-i", video, "-frames:v", "1", "-vf", "scale=960:-2", "-q:v", "4", "-y", file]);
-      frames.push({ time: t, data: new Uint8Array(await readFile(file)) });
+      return new Uint8Array(await readFile(file));
+    };
+    const frames: { time: number; a: Uint8Array; b: Uint8Array }[] = [];
+    for (const [i, t] of times.entries()) {
+      const later = Math.min(t + PAIR_GAP_SECONDS, duration - 0.05);
+      frames.push({ time: t, a: await grab(t, join(dir, `f${i}a.jpg`)), b: await grab(later, join(dir, `f${i}b.jpg`)) });
     }
 
-    const batches: { time: number; data: Uint8Array }[][] = [];
-    for (let i = 0; i < frames.length; i += FRAMES_PER_CALL) batches.push(frames.slice(i, i + FRAMES_PER_CALL));
+    const batches: (typeof frames)[] = [];
+    for (let i = 0; i < frames.length; i += PAIRS_PER_CALL) batches.push(frames.slice(i, i + PAIRS_PER_CALL));
 
     const results = await Promise.all(
       batches.map(async (batch) => {
         const content = batch.flatMap((f, i) => [
-          { type: "text" as const, text: `Frame ${i + 1} (at ${formatTime(f.time)}):` },
-          { type: "file" as const, data: f.data, mediaType: "image/jpeg" },
+          { type: "text" as const, text: `Frame ${i + 1}a (at ${formatTime(f.time)}):` },
+          { type: "file" as const, data: f.a, mediaType: "image/jpeg" },
+          { type: "text" as const, text: `Frame ${i + 1}b (one second later):` },
+          { type: "file" as const, data: f.b, mediaType: "image/jpeg" },
         ]);
-        content.unshift({ type: "text", text: `Review these ${batch.length} frames.` });
+        content.unshift({ type: "text", text: `Review these ${batch.length} frame pairs.` });
         try {
           const review = await generateJson(log, QWEN_VISION, reviewSchema, REVIEW_SYSTEM, content);
           return review.issues
