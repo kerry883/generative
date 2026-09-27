@@ -161,6 +161,7 @@ The frame is 14.2 units wide (x from -7.1 to 7.1) and 8 units tall (y from -4 to
 - There are no gradients: .set_fill(color=[A, B], direction=...) and set_gradient_by_direction do not exist. Use separate solid-colored shapes.
 - Axes has no get_bar, plot_bar_graph or add_bars. Use BarChart, or Rectangles placed with axes.c2p(x, y).
 - There is no PieChart; build pies from Sector.
+- Colors: use Manim's constants (WHITE, GRAY, RED, ORANGE, YELLOW, GREEN, TEAL, BLUE, PURPLE, PINK, GOLD, MAROON, and variants such as BLUE_A..BLUE_E) or hex strings like "#FF00FF". MAGENTA and CYAN are not Manim constants.
 - Use Create for shapes, Write for Text and MathTex, FadeIn/FadeOut, Transform/TransformMatchingTex, and Indicate/Circumscribe for emphasis.
 
 == 6. NARRATION STYLE ==

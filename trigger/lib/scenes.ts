@@ -106,6 +106,14 @@ import os
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from custom_google_tts import CustomGoogleService
+
+# Added by the pipeline: color names models often use that Manim does not define.
+for _name, _hex in {
+    "MAGENTA": "#FF00FF", "CYAN": "#00FFFF", "LIME": "#32CD32", "NAVY": "#000080",
+    "BROWN": "#8B4513", "VIOLET": "#8F00FF", "INDIGO": "#4B0082", "SILVER": "#C0C0C0",
+    "LIGHT_BLUE": "#ADD8E6", "DARK_GREEN": "#006400", "DARK_RED": "#8B0000", "BEIGE": "#F5F5DC",
+}.items():
+    globals().setdefault(_name, _hex)
 ${SYNC_HELPER}
 
 class ${SCENE_CLASS}(VoiceoverScene, MovingCameraScene):
