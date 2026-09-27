@@ -70,10 +70,11 @@ function caseLog(name: string): Log {
     const s = JSON.stringify(data);
     return s.length > 300 ? ` ${s.slice(0, 300)}…` : ` ${s}`;
   };
+  const ts = () => new Date().toTimeString().slice(0, 8);
   return {
-    info: (m, d) => console.log(`[${name}] ${m}${fmt(d)}`),
-    warn: (m, d) => console.warn(`[${name}] WARN ${m}${fmt(d)}`),
-    error: (m, d) => console.error(`[${name}] ERROR ${m}${fmt(d)}`),
+    info: (m, d) => console.log(`${ts()} [${name}] ${m}${fmt(d)}`),
+    warn: (m, d) => console.warn(`${ts()} [${name}] WARN ${m}${fmt(d)}`),
+    error: (m, d) => console.error(`${ts()} [${name}] ERROR ${m}${fmt(d)}`),
   };
 }
 
@@ -189,6 +190,17 @@ interface CaseOutcome {
   videoUrl?: string;
   estimatedDuration?: string;
   sync?: SyncReport;
+  visual?: string;
+  repairs?: string;
+}
+
+function traceSummary(result: PipelineResult) {
+  const t = result.trace;
+  const high = t.visual?.issues.filter((i) => i.severity === "high").length;
+  return {
+    visual: t.visual ? `${t.visual.outcome} (${high ?? 0} high)` : undefined,
+    repairs: t.repairs?.map((r) => `${r.reason}:${r.scenes.join("+")}`).join(" ") || undefined,
+  };
 }
 
 async function runCase(c: EvalCase): Promise<CaseOutcome> {
@@ -212,6 +224,7 @@ async function runCase(c: EvalCase): Promise<CaseOutcome> {
     seconds,
     attempts: result.trace.attempts,
     estimatedDuration: result.trace.estimatedDuration,
+    ...traceSummary(result),
   };
   if (!result.ok) return { ...outcome, error: result.error };
 
@@ -275,6 +288,8 @@ async function main() {
       "max silent": o.sync?.longestSilentWhileMoving,
       "frozen+speaking(s)": o.sync?.frozenWhileSpeaking,
       "max frozen": o.sync?.longestFrozenWhileSpeaking,
+      visual: o.visual,
+      repairs: o.repairs,
     })),
   );
   const failed = outcomes.filter((o) => !o.ok);
