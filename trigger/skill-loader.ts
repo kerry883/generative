@@ -300,6 +300,9 @@ with self.voiceover(text="""E is energy, m is mass, and c is the speed of light.
     self.play(formula[3].animate.set_color(RED), run_time=tracker.duration * 0.4)
 ~~~
 Splitting MathTex into separate strings (as above) is the reliable way to address parts.
+Each string must be complete LaTeX on its own: split only between whole terms, never inside {...}, \frac{..}{..}, \sqrt{..} or \left( ... \right).
+- WRONG: MathTex(r"\sqrt{", r"b^2 - 4ac", r"}")
+- RIGHT: MathTex(r"x = ", r"\frac{-b \pm \sqrt{b^2 - 4ac}}{2a}")
 
 ## Step-by-Step Equation Solving
 ~~~python

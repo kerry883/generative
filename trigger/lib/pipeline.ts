@@ -261,16 +261,17 @@ async function renderWithRepairs(
     trace.prepare.push({ fixes: prepared.fixes, warnings: prepared.warnings, errors: prepared.errors, sync: prepared.sync });
     log.info("Prepared code", { fixes: prepared.fixes, warnings: prepared.warnings, errors: prepared.errors });
 
-    let line: number | undefined;
+    let lines: number[] = [];
     let reason: "validation" | "syntax" | "render";
     const syntax = prepared.errors.length ? null : await checkSyntax(prepared.code);
     if (prepared.errors.length) {
       reason = "validation";
       failure = `The file failed validation before rendering:\n- ${prepared.errors.join("\n- ")}`;
+      lines = prepared.errorLines;
     } else if (syntax && !syntax.ok) {
       reason = "syntax";
       failure = syntax.message;
-      line = syntax.line;
+      if (syntax.line) lines = [syntax.line];
     } else {
       reason = "render";
       log.info(`Rendering attempt ${attempt}/${maxAttempts}`);
@@ -286,25 +287,33 @@ async function renderWithRepairs(
         log.error("Render service unavailable", { error: failure.slice(0, 300) });
         return { ok: false, error: `Render service unavailable: ${failure.slice(0, 300)}`, code, attempts: attempt };
       }
-      line = errorLine(failure);
+      const line = errorLine(failure);
+      if (line !== undefined) lines = [line];
     }
 
     trace.renderErrors.push(failure);
-    log.error(`Attempt ${attempt} failed`, { reason, line, error: failure.slice(-1500) });
+    log.error(`Attempt ${attempt} failed`, { reason, lines, error: failure.slice(-1500) });
     if (attempt >= maxAttempts) break;
 
-    // Repair only the scene the error points at; if it can't be located,
+    // Repair only the scenes the error points at; if it can't be located,
     // let every scene check itself against the error.
-    const culprit = (line !== undefined ? sceneForLine(file.ranges, line) : undefined) ?? sceneForText(bodies, failure);
-    const targets = culprit ? [culprit] : scenes.map((s) => s.number);
+    const located = [...new Set(lines.map((l) => sceneForLine(file.ranges, l)).filter((n): n is number => n !== undefined))];
+    const byText = located.length ? undefined : sceneForText(bodies, failure);
+    const targets = located.length ? located : byText ? [byText] : scenes.map((s) => s.number);
     trace.repairs.push({ reason, scenes: targets });
-    log.info("Repairing scenes", { scenes: targets, line });
+    log.info("Repairing scenes", { scenes: targets, lines });
 
     try {
-      const error = failure.slice(-3000); // tracebacks end with the useful part
+      // Tracebacks end with the useful part. LaTeX failures only say "see log
+      // output", so point the model at the marked MathTex/Tex line.
+      const latexHint = /latex error|converting to dvi|tex_to_svg/i.test(failure)
+        ? "\n\nHint: a MathTex/Tex string on the marked line failed to compile in LaTeX. Check for unbalanced braces, unknown commands, and that every string passed to MathTex/Tex is complete LaTeX on its own."
+        : "";
+      const error = failure.slice(-3000) + latexHint;
       const repaired = await mapLimit(targets, CODER_CONCURRENCY, (n) => {
         const range = file.ranges[n - 1];
-        const lineInBody = culprit === n && line !== undefined ? line - range.firstLine + 1 : undefined;
+        const lineInScene = lines.find((l) => l >= range.firstLine && l <= range.lastLine);
+        const lineInBody = lineInScene !== undefined ? lineInScene - range.firstLine + 1 : undefined;
         const shown = lineInBody ? markLine(bodies[n - 1], lineInBody) : bodies[n - 1];
         return generateParsed(
           log,

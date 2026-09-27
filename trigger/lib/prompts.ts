@@ -140,6 +140,7 @@ A block's narration audio starts when the block starts, and its length is tracke
 
 == 3. PYTHON STRING RULES ==
 - LaTeX is always a raw string with single backslashes: MathTex(r"x = \frac{-b \pm \sqrt{b^2 - 4ac}}{2a}"). Never double the backslashes. The same applies to Tex(), axis labels and get_graph_label().
+- When MathTex gets several strings, each one must be complete LaTeX on its own. Split only between whole terms, never inside {...}, \frac, \sqrt or \left...\right.
 - Text() uses double quotes and plain text only, never LaTeX: Text("It's working").
 - Narration uses triple double quotes, text="""...""", with no blank lines and no double-quote characters inside. Write it the way it is spoken: "x squared", not "x^2".
 - Use ASCII characters only in the whole file: no emoji, smart quotes, arrows or degree signs. Write "degrees", "->" and so on.
