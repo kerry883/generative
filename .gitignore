@@ -42,3 +42,7 @@ next-env.d.ts
 
 # trigger.dev local artifacts
 .trigger/
+
+# local video eval output
+eval-out/
+eval-*.log
