@@ -143,6 +143,26 @@ describe("prepareCode LaTeX and characters", () => {
     expect(out.fixes.join()).toContain("non-ASCII");
   });
 
+  test("flags MathTex strings that are not complete LaTeX, with their line", () => {
+    const code =
+      HEADER +
+      String.raw`
+        with self.voiceover(text="""The formula.""") as tracker:
+            ok = MathTex(r"x = ", r"\frac{-b \pm \sqrt{b^2-4ac}}{2a}", r"\{a, b\}")
+            bad = MathTex(r"x = \frac{-b \pm \sqrt{", r"b^2-4ac", r"}}{2a}")
+            paren = MathTex(r"\left( a + b", r"\right)")
+            self.play(Write(ok), run_time=tracker.duration)
+`;
+    const out = prepareCode(code, "Demo");
+    const lines = code.split("\n");
+    const badLine = lines.findIndex((l) => l.includes("bad = MathTex")) + 1;
+    const parenLine = lines.findIndex((l) => l.includes("paren = MathTex")) + 1;
+    expect(out.errors.length).toBe(4); // 2 unbalanced pieces of bad + both halves of paren
+    expect(out.errors[0]).toContain("unbalanced braces");
+    expect(out.errors.at(-1)).toContain("\\left without matching \\right");
+    expect(new Set(out.errorLines)).toEqual(new Set([badLine, parenLine]));
+  });
+
   test("flags a missing scene class and missing narration", () => {
     const out = prepareCode("from manim import *\nclass Other(Scene):\n    def construct(self):\n        pass\n", "Demo");
     expect(out.errors.length).toBe(3);

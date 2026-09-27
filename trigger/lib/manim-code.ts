@@ -395,12 +395,58 @@ function fixNonAscii(src: string, fixes: string[], warnings: string[]): string {
   return out;
 }
 
+const lineOf = (src: string, index: number) => src.slice(0, index).split("\n").length;
+
+// Brace depth of a LaTeX string, ignoring escaped braces; NaN if it closes
+// more than it opens at any point.
+function braceBalance(tex: string): number {
+  let depth = 0;
+  for (let i = 0; i < tex.length; i++) {
+    if (tex[i] === "\\") {
+      i++; // skip the escaped character (\{, \}, \\ ...)
+      continue;
+    }
+    if (tex[i] === "{") depth++;
+    else if (tex[i] === "}" && --depth < 0) return NaN;
+  }
+  return depth;
+}
+
+// Each string passed to MathTex/Tex must be complete LaTeX: a formula split in
+// the middle of \sqrt{...} or \left( ... \right) fails to compile.
+function lintLatex(src: string, errors: string[], errorLines: number[]) {
+  const scan = scanPython(src);
+  for (const m of codeMatches(src, scan.mask, /\b(MathTex|Tex|SingleStringMathTex)\s*\(/)) {
+    const open = m.index + m[0].length - 1;
+    const close = matchParen(src, scan.mask, open);
+    if (close === -1) continue;
+    for (const arg of splitArgs(src, scan.mask, open, close)) {
+      if (/^\w+\s*=/.test(arg.text)) continue;
+      const lit = scan.strings.find((s) => src.slice(s.start, s.end) === arg.text && s.start >= arg.start && s.end <= arg.end);
+      if (!lit) continue;
+      const tex = stringValue(src, lit);
+      const lefts = (tex.match(/\\left(?![a-zA-Z])/g) ?? []).length;
+      const rights = (tex.match(/\\right(?![a-zA-Z])/g) ?? []).length;
+      const balance = braceBalance(tex);
+      if (balance === 0 && lefts === rights) continue;
+      const line = lineOf(src, m.index);
+      errors.push(
+        `line ${line}: ${m[1]} string "${tex}" is not complete LaTeX (${balance !== 0 ? "unbalanced braces" : "\\left without matching \\right"}). ` +
+          `Each string passed to ${m[1]} must compile on its own: never split a formula inside {...}, \\frac, \\sqrt or \\left...\\right.`,
+      );
+      errorLines.push(line);
+    }
+  }
+}
+
 export interface PreparedCode {
   code: string;
   fixes: string[];
   warnings: string[];
   // Problems that would make the render fail or be unusable; sent to repair before rendering.
   errors: string[];
+  // Line numbers of errors that point at a specific line.
+  errorLines: number[];
   sync: SyncStats;
 }
 
@@ -408,6 +454,7 @@ export function prepareCode(input: string, sceneName: string): PreparedCode {
   const fixes: string[] = [];
   const warnings: string[] = [];
   const errors: string[] = [];
+  const errorLines: number[] = [];
 
   let code = input.replace(/\r\n/g, "\n");
   code = fixNonAscii(code, fixes, warnings);
@@ -423,8 +470,9 @@ export function prepareCode(input: string, sceneName: string): PreparedCode {
   }
   if (!code.includes("set_speech_service(")) errors.push("self.set_speech_service(CustomGoogleService(...)) is missing");
   if (s.blocks === 0) errors.push("there are no `with self.voiceover(...)` blocks, so the video would have no narration");
+  lintLatex(code, errors, errorLines);
 
-  return { code, fixes, warnings, errors, sync: s };
+  return { code, fixes, warnings, errors, errorLines, sync: s };
 }
 
 // ─── syntax check ─────────────────────────────────────
