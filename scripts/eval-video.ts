@@ -112,6 +112,30 @@ function parseIntervals(log: string, kind: "silence" | "freeze", duration: numbe
   return intervals;
 }
 
+// Runs of frames whose max pixel change stays below `threshold` (0-255) for at
+// least `minSeconds`.
+function staticIntervals(log: string, duration: number, minSeconds: number, threshold = 12): Interval[] {
+  const samples: { t: number; ymax: number }[] = [];
+  let t: number | null = null;
+  for (const line of log.split(/\r?\n/)) {
+    const time = line.match(/pts_time:([\d.]+)/);
+    if (time) t = Number(time[1]);
+    const y = line.match(/lavfi\.signalstats\.YMAX=([\d.]+)/);
+    if (y && t !== null) samples.push({ t, ymax: Number(y[1]) });
+  }
+  const out: Interval[] = [];
+  let start: number | null = null;
+  for (const s of samples) {
+    if (s.ymax < threshold) start ??= s.t;
+    else if (start !== null) {
+      if (s.t - start >= minSeconds) out.push({ start, end: s.t });
+      start = null;
+    }
+  }
+  if (start !== null && duration - start >= minSeconds) out.push({ start, end: duration });
+  return out;
+}
+
 const total = (xs: Interval[]) => xs.reduce((a, i) => a + (i.end - i.start), 0);
 
 // Length of `a` that does NOT overlap any interval in `b`.
@@ -159,10 +183,15 @@ async function analyzeSync(file: string): Promise<SyncReport> {
   const silences = hasAudio ? parseIntervals(silenceLog, "silence", duration) : [{ start: 0, end: duration }];
 
   // Static picture > 4s (matches the prompt's "no static yapping > 4 seconds" rule).
-  const freezeLog = await run([
-    "ffmpeg", "-hide_banner", "-i", file, "-vf", "freezedetect=n=0.001:d=4", "-map", "0:v:0", "-f", "null", "-",
+  // freezedetect averages over the whole frame and calls small changes (a label
+  // being written) frozen, so instead: a frame is static when NO pixel changed
+  // visibly since the previous one (max per-pixel difference, sampled at 4 fps).
+  const motionLog = await run([
+    "ffmpeg", "-hide_banner", "-i", file, "-map", "0:v:0", "-vf",
+    "fps=4,scale=640:-2,format=gray,tblend=all_mode=difference,signalstats,metadata=print:key=lavfi.signalstats.YMAX",
+    "-f", "null", "-",
   ]);
-  const freezes = parseIntervals(freezeLog, "freeze", duration);
+  const freezes = staticIntervals(motionLog, duration, 4);
 
   const silentMoving = outside(silences, freezes);
   const frozenSpeaking = outside(freezes, silences);
