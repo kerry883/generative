@@ -40,6 +40,38 @@ export function extractJson(text: string): unknown {
   return JSON.parse(cleaned.slice(start, end + 1));
 }
 
+// Streams a plain-text response and parses it, retrying up to 3 times with the
+// parse error fed back to the model.
+export async function generateParsed<T>(
+  log: Log,
+  model: string,
+  system: string,
+  prompt: string,
+  parse: (text: string) => T,
+  invalidHint = "Follow the required response format exactly.",
+): Promise<T> {
+  let lastError = "";
+
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      const result = streamText({
+        model: qwen(model),
+        maxRetries: 1,
+        system: lastError
+          ? `${system}\n\nYour previous response was invalid: ${lastError}\n${invalidHint}`
+          : system,
+        prompt,
+      });
+      return parse(await result.text);
+    } catch (e) {
+      lastError = (e instanceof Error ? e.message : String(e)).slice(0, 500);
+    }
+    log.warn("Model call failed, retrying", { model, attempt, error: lastError });
+  }
+
+  throw new Error(`Model failed to produce a valid response after 3 attempts: ${lastError}`);
+}
+
 export async function generateJson<T extends z.ZodType>(
   log: Log,
   model: string,
@@ -48,32 +80,18 @@ export async function generateJson<T extends z.ZodType>(
   prompt: string,
 ): Promise<z.output<T>> {
   const schemaText = JSON.stringify(z.toJSONSchema(schema), null, 2);
-  let lastError = "";
-
-  for (let attempt = 1; attempt <= 3; attempt++) {
-    try {
-      const result = streamText({
-        model: qwen(model),
-        maxRetries: 1,
-        system:
-          `${system}\n\n` +
-          `You MUST respond with ONLY one valid JSON object. No markdown fences, no commentary.\n` +
-          `The JSON object must conform to this schema:\n${schemaText}` +
-          (lastError
-            ? `\n\nYour previous response was invalid: ${lastError}\nReturn the corrected JSON object.`
-            : ""),
-        prompt,
-      });
-      const text = await result.text;
-
+  return generateParsed(
+    log,
+    model,
+    `${system}\n\n` +
+      `You MUST respond with ONLY one valid JSON object. No markdown fences, no commentary.\n` +
+      `The JSON object must conform to this schema:\n${schemaText}`,
+    prompt,
+    (text) => {
       const parsed = schema.safeParse(extractJson(text));
-      if (parsed.success) return parsed.data;
-      lastError = parsed.error.message.slice(0, 500);
-    } catch (e) {
-      lastError = (e instanceof Error ? e.message : String(e)).slice(0, 500);
-    }
-    log.warn("Model call failed, retrying", { model, attempt, error: lastError });
-  }
-
-  throw new Error(`Model failed to produce valid JSON after 3 attempts: ${lastError}`);
+      if (!parsed.success) throw new Error(parsed.error.message);
+      return parsed.data;
+    },
+    "Return the corrected JSON object.",
+  );
 }

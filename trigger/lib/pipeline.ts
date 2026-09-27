@@ -1,8 +1,7 @@
 import { z } from "zod";
-import { generateJson, QWEN_MAX, QWEN_PLUS, type Log } from "./llm";
+import { generateJson, generateParsed, QWEN_MAX, QWEN_PLUS, type Log } from "./llm";
 import { searchTopic, type Source } from "./research";
 import {
-  GENERATION_PROMPT,
   SEARCH_QUERY_SYSTEM,
   buildSearchQueryPrompt,
   DIRECTOR_SYSTEM,
@@ -10,28 +9,17 @@ import {
   SKILL_SELECTOR_SYSTEM,
   buildSkillSelectorPrompt,
   CODER_SYSTEM,
+  buildCoderPrompt,
   buildRepairPrompt,
 } from "./prompts";
+import { extractTranscript, parseCodeResponse, prepareCode, type SyncStats } from "./manim-code";
 import { getSkillManifest, loadSkills, formatManifestForSelector } from "../skill-loader";
 
 // Manim render microservice (hardcoded - verified working endpoint)
 export const MANIM_API_URL = "https://foldex-renderer-777822234917.us-central1.run.app";
 
 const MAX_ATTEMPTS = 4;
-
-// Schemas
-const videoSchema = z.object({
-  scenename: z.string(),
-  code: z.string(),
-  title: z.string(),
-  description: z.string(),
-});
-
-const fixSchema = z.object({
-  fixedCode: z.string().describe("The corrected Manim python code"),
-  explanation: z.string().describe("Brief explanation of what was fixed"),
-  scenename: z.string().describe("The name of the scene"),
-});
+const RENDER_TIMEOUT_MS = 30 * 60 * 1000;
 
 export interface PipelineInput {
   prompt: string;
@@ -46,6 +34,8 @@ export interface PipelineTrace {
   estimatedDuration?: string;
   sceneCount?: number;
   skills: string[];
+  // Per attempt: what prepareCode fixed or flagged before rendering.
+  prepare: { fixes: string[]; warnings: string[]; errors: string[]; sync: SyncStats }[];
   renderErrors: string[];
   attempts: number;
 }
@@ -67,7 +57,7 @@ export type PipelineResult =
 
 export async function runVideoPipeline(log: Log, input: PipelineInput): Promise<PipelineResult> {
   const { prompt, context } = input;
-  const trace: PipelineTrace = { sourcesCount: 0, skills: [], renderErrors: [], attempts: 0 };
+  const trace: PipelineTrace = { sourcesCount: 0, skills: [], prepare: [], renderErrors: [], attempts: 0 };
 
   // ═══════════════════════════════════════
   // Step 1: Smart Search — Extract a clean, factual query from the raw prompt
@@ -147,82 +137,76 @@ export async function runVideoPipeline(log: Log, input: PipelineInput): Promise<
   // Step 4: Generate Manim Code
   // The code generator sees ONLY the rules, the selected skills and the
   // Director's script — never the raw PDF context or search results.
+  // The code comes back as plain text in a fenced block, not inside JSON, so it
+  // needs no extra layer of escaping.
   // ═══════════════════════════════════════
-  const codeGenPrompt = `
-PRODUCTION SCRIPT (from Director — implement this exactly):
-${directorScript.script}
-`;
-  const fullPrompt = GENERATION_PROMPT + skillContent + "\n\n" + codeGenPrompt;
+  const coderPrompt = buildCoderPrompt(directorScript.script, skillContent);
   log.info("Code generation prompt size", {
-    totalChars: fullPrompt.length,
-    generationPromptChars: GENERATION_PROMPT.length,
+    systemChars: CODER_SYSTEM.length,
     skillChars: skillContent.length,
     directorScriptChars: directorScript.script.length,
   });
 
-  const output = await generateJson(log, QWEN_MAX, videoSchema, CODER_SYSTEM, fullPrompt);
-  log.info("LLM generated code", { scenename: output.scenename, code: output.code });
+  const output = await generateParsed(log, QWEN_MAX, CODER_SYSTEM, coderPrompt, parseCodeResponse);
+  log.info("LLM generated code", { sceneName: output.sceneName, code: output.code });
 
   // ═══════════════════════════════════════
-  // Step 5: Render with self-healing retry loop
+  // Step 5: Prepare, render, and repair
+  // Every attempt first runs the deterministic fixes (voiceover sync, LaTeX,
+  // characters). Structural problems go straight to repair without a render.
   // ═══════════════════════════════════════
-  let currentCode = output.code;
-  let currentSceneName = output.scenename;
-  const currentTranscript = "";
+  let current = { code: output.code, sceneName: output.sceneName };
 
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
     trace.attempts = attempt;
-    log.info(`Rendering attempt ${attempt}/${MAX_ATTEMPTS}`);
+    const prepared = prepareCode(current.code, current.sceneName);
+    trace.prepare.push({ fixes: prepared.fixes, warnings: prepared.warnings, errors: prepared.errors, sync: prepared.sync });
+    log.info("Prepared code", { fixes: prepared.fixes, warnings: prepared.warnings, errors: prepared.errors });
 
-    const response = await fetch(`${MANIM_API_URL}/generate-video`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ scenename: currentSceneName, code: currentCode }),
-    });
-
-    if (response.ok) {
-      const data = await response.json();
-      log.info(`Video generated successfully on attempt ${attempt}`);
-      return {
-        ok: true,
-        videoUrl: data.video_url,
-        fileSize: data.file_size,
-        thumbnailUrl: data.thumbnail_url,
-        title: output.title,
-        description: output.description,
-        transcript: currentTranscript,
-        sources,
-        code: currentCode,
-        trace,
-      };
+    let failure: string;
+    if (prepared.errors.length) {
+      failure = `The file failed validation before rendering:\n- ${prepared.errors.join("\n- ")}`;
+    } else {
+      log.info(`Rendering attempt ${attempt}/${MAX_ATTEMPTS}`);
+      const render = await renderVideo(current.sceneName, prepared.code);
+      if (render.ok) {
+        log.info(`Video generated successfully on attempt ${attempt}`);
+        return {
+          ok: true,
+          videoUrl: render.data.video_url,
+          fileSize: render.data.file_size,
+          thumbnailUrl: render.data.thumbnail_url,
+          title: output.title,
+          description: output.description,
+          transcript: extractTranscript(prepared.code),
+          sources,
+          code: prepared.code,
+          trace,
+        };
+      }
+      failure = render.error;
     }
 
-    const errorData = await response.text();
-    trace.renderErrors.push(errorData);
-    log.error(`Attempt ${attempt} failed`, { error: errorData });
+    trace.renderErrors.push(failure);
+    log.error(`Attempt ${attempt} failed`, { error: failure });
 
     if (attempt >= MAX_ATTEMPTS) {
       log.error(`All ${MAX_ATTEMPTS} attempts exhausted`);
       break;
     }
 
-    // Try to fix the code with AI
+    // Repair from the model's own code (before our fixes) so it sees what it wrote.
     log.info(`Asking Qwen to fix the code (attempt ${attempt + 1})`);
     try {
-      const fixResult = await generateJson(
+      const fixed = await generateParsed(
         log,
         QWEN_MAX,
-        fixSchema,
-        GENERATION_PROMPT + skillContent, // Skills loaded so fixer knows correct patterns
-        buildRepairPrompt(errorData, directorScript.script, currentCode),
+        CODER_SYSTEM,
+        `${skillContent}\n\n${buildRepairPrompt(failure, directorScript.script, current.code)}`,
+        parseCodeResponse,
       );
-      log.info("Fix applied", { explanation: fixResult.explanation, fixedCode: fixResult.fixedCode });
-
-      currentCode = fixResult.fixedCode;
-      currentSceneName = fixResult.scenename;
-
-      // Small delay before retry
-      await new Promise((resolve) => setTimeout(resolve, 1000));
+      current = { code: fixed.code, sceneName: fixed.sceneName };
+      log.info("Fix applied", { sceneName: fixed.sceneName });
     } catch (fixError) {
       log.error("Failed to generate fix", { error: String(fixError) });
       break;
@@ -233,7 +217,31 @@ ${directorScript.script}
   return {
     ok: false,
     error: `Failed to generate video after ${MAX_ATTEMPTS} attempts. Last error: ${lastError.substring(0, 200)}`,
-    code: currentCode,
+    code: current.code,
     trace,
   };
+}
+
+interface RenderData {
+  video_url: string;
+  file_size: number;
+  thumbnail_url: string;
+}
+
+async function renderVideo(
+  sceneName: string,
+  code: string,
+): Promise<{ ok: true; data: RenderData } | { ok: false; error: string }> {
+  try {
+    const response = await fetch(`${MANIM_API_URL}/generate-video`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ scenename: sceneName, code }),
+      signal: AbortSignal.timeout(RENDER_TIMEOUT_MS),
+    });
+    if (response.ok) return { ok: true, data: (await response.json()) as RenderData };
+    return { ok: false, error: await response.text() };
+  } catch (e) {
+    return { ok: false, error: `Render request failed: ${e instanceof Error ? e.message : String(e)}` };
+  }
 }
