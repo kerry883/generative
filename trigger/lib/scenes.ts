@@ -164,14 +164,18 @@ export function assembleFile(scenes: ScriptScene[], bodies: string[]): Assembled
 
 // ─── mapping problems to scenes ───────────────────────
 
-// Line in the generated file that a Python traceback points at. Tracebacks can
-// be plain ("File "x.py", line 57") or rich-formatted ("x.py:57 in construct").
-export function errorLine(error: string): number | undefined {
-  const frames = [...error.matchAll(/([^\s"'│|()]+\.py)"?(?:,\s*line\s+|:)(\d+)/g)].filter(
-    (m) => !/site-packages|dist-packages|[\\/]lib[\\/]python|[\\/]manim[\\/]|[\\/]manim_voiceover[\\/]|custom_google_tts/.test(m[1]),
-  );
-  const syntax = error.match(/line (\d+)/);
-  if (frames.length) return Number(frames[frames.length - 1][2]);
+// Line in the generated file that a Python traceback points at. The render
+// service saves the code as <SceneClass>.py; tracebacks can be plain
+// ('File ".../GeneratedVideo.py", line 57') or rich-formatted
+// ('/app/output/GeneratedVideo.py:57 in construct'). Only frames in that file
+// count: rich wraps long library paths across lines, so other ".py:N" matches
+// can be fragments of library paths.
+export function errorLine(error: string, fileName = `${SCENE_CLASS}.py`): number | undefined {
+  const name = fileName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const frames = [...error.matchAll(new RegExp(`(?:^|[\\s"'/\\\\])${name}"?(?:,\\s*line\\s+|:)(\\d+)`, "g"))];
+  if (frames.length) return Number(frames[frames.length - 1][1]);
+  // Syntax errors reported by our own check: "SyntaxError: ... (line N)"
+  const syntax = error.match(/^SyntaxError:.*\(line (\d+)\)/m);
   return syntax ? Number(syntax[1]) : undefined;
 }
 

@@ -141,8 +141,23 @@ TypeError: unsupported operand`;
     expect(errorLine(tb)).toBe(88);
   });
 
+  test("ignores library paths that rich wrapped across lines", () => {
+    const tb = String.raw`/app/output/GeneratedVideo.py:285 in construct
+ /usr/local/lib/python3.11/site-packages/manim/mobject/types/vectorized_mobje \n ct.py:882 in start_new_path`;
+    expect(errorLine(tb)).toBe(285);
+  });
+
+  test("structured error from the render service", () => {
+    expect(errorLine('{"error_location":"GeneratedVideo.py, line 103, in construct","error_type":"NameError"}')).toBe(103);
+  });
+
+  test("our own syntax check", () => {
+    expect(errorLine("SyntaxError: unterminated string literal (line 42)")).toBe(42);
+  });
+
   test("no line information", () => {
     expect(errorLine("LaTeX Error: Undefined control sequence")).toBeUndefined();
+    expect(errorLine("ct.py:882 in start_new_path")).toBeUndefined();
   });
 });
 
