@@ -1,6 +1,11 @@
 import { defineConfig } from "@trigger.dev/sdk";
+import { ffmpeg } from "@trigger.dev/build/extensions/core";
 
 export default defineConfig({
+  build: {
+    // ffmpeg samples frames from rendered videos for the visual review step.
+    extensions: [ffmpeg()],
+  },
   // Your Trigger.dev project ref (proj_xxx) — from the Trigger.dev dashboard
   project: process.env.TRIGGER_PROJECT_REF ?? "proj_REPLACE_ME",
   dirs: ["./trigger"],
