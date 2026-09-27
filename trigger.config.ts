@@ -1,10 +1,14 @@
 import { defineConfig } from "@trigger.dev/sdk";
-import { ffmpeg } from "@trigger.dev/build/extensions/core";
+import { aptGet, ffmpeg } from "@trigger.dev/build/extensions/core";
 
 export default defineConfig({
   build: {
-    // ffmpeg samples frames from rendered videos for the visual review step.
-    extensions: [ffmpeg()],
+    extensions: [
+      // ffmpeg samples frames from rendered videos for the visual review step.
+      ffmpeg(),
+      // python3 syntax-checks generated Manim code before it is sent to the renderer.
+      aptGet({ packages: ["python3"] }),
+    ],
   },
   // Your Trigger.dev project ref (proj_xxx) — from the Trigger.dev dashboard
   project: process.env.TRIGGER_PROJECT_REF ?? "proj_REPLACE_ME",
