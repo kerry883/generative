@@ -38,6 +38,9 @@ const VISUAL_REPAIR_ATTEMPTS = 2;
 const RENDER_TIMEOUT_MS = 30 * 60 * 1000;
 // Scenes are coded in parallel; this caps concurrent requests to the model API.
 const CODER_CONCURRENCY = 3;
+// Thinking-token budgets for Qwen Max. Unbounded thinking made single calls
+// take many minutes; these keep planning and diagnosis without the stall.
+const THINKING = { director: 2000, coder: 1500, repair: 2000 };
 // Frame review after rendering; set VIDEO_VISUAL_QA=off to skip it.
 const VISUAL_QA = process.env.VIDEO_VISUAL_QA !== "off";
 
@@ -126,6 +129,7 @@ export async function runVideoPipeline(log: Log, input: PipelineInput): Promise<
     DIRECTOR_SYSTEM,
     buildDirectorPrompt(prompt, searchContent, documentContext),
     parseDirectorScript,
+    { thinking: THINKING.director },
   );
   trace.directorScript = director.script;
   trace.estimatedDuration = director.duration;
@@ -177,6 +181,7 @@ export async function runVideoPipeline(log: Log, input: PipelineInput): Promise<
       CODER_SYSTEM,
       buildScenePrompt(director.script, scene.text, scene.number, scenes.length, skillContent),
       parseSceneBody,
+      { thinking: THINKING.coder },
     );
     log.info(`Scene ${scene.number} coded`, { lines: body.split("\n").length });
     return body;
@@ -301,6 +306,7 @@ async function renderWithRepairs(
           CODER_SYSTEM,
           buildSceneRepairPrompt(error, scenes[n - 1].text, shown, ctx.skillContent),
           (text) => parseSceneBody(text).replace(/\s*# <-- ERROR HERE/g, ""),
+          { thinking: THINKING.repair },
         );
       });
       targets.forEach((n, i) => (bodies[n - 1] = repaired[i]));
@@ -378,6 +384,7 @@ async function reviewAndImprove(ctx: RenderContext, first: Rendered): Promise<Re
         CODER_SYSTEM,
         buildSceneVisualRepairPrompt(problems, scenes[n - 1].text, first.bodies[n - 1], ctx.skillContent),
         parseSceneBody,
+        { thinking: THINKING.repair },
       );
     });
     const bodies = [...first.bodies];

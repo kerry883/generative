@@ -192,6 +192,7 @@ export async function condenseContext(log: Log, prompt: string, context: string)
             if (text.trim().length < 20) throw new Error("Notes are empty");
             return text.trim();
           },
+          { thinking: false },
         );
       }
     }),

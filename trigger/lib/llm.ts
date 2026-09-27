@@ -59,6 +59,18 @@ function describeError(e: unknown): string {
   return parts.join(" <- ");
 }
 
+export interface GenerateOptions {
+  // Qwen "thinks" before answering by default, which can take minutes on large
+  // prompts. A number caps the thinking tokens; false turns thinking off.
+  thinking?: number | false;
+  invalidHint?: string;
+}
+
+function thinkingOptions(thinking: number | false | undefined) {
+  if (thinking === undefined) return undefined;
+  return { qwen: thinking === false ? { enable_thinking: false } : { enable_thinking: true, thinking_budget: thinking } };
+}
+
 // Streams a plain-text response and parses it, retrying up to 3 times with the
 // parse error fed back to the model.
 export async function generateParsed<T>(
@@ -67,11 +79,13 @@ export async function generateParsed<T>(
   system: string,
   prompt: PromptContent,
   parse: (text: string) => T,
-  invalidHint = "Follow the required response format exactly.",
+  options: GenerateOptions = {},
 ): Promise<T> {
+  const invalidHint = options.invalidHint ?? "Follow the required response format exactly.";
   let lastError = "";
 
   for (let attempt = 1; attempt <= 3; attempt++) {
+    const started = Date.now();
     try {
       const result = streamText({
         model: qwen(model),
@@ -80,23 +94,26 @@ export async function generateParsed<T>(
           ? `${system}\n\nYour previous response was invalid: ${lastError}\n${invalidHint}`
           : system,
         messages: [{ role: "user", content: prompt }],
+        providerOptions: thinkingOptions(options.thinking),
       });
       return parse(await result.text);
     } catch (e) {
       lastError = describeError(e).slice(0, 500);
     }
-    log.warn("Model call failed, retrying", { model, attempt, error: lastError });
+    log.warn("Model call failed, retrying", { model, attempt, seconds: Math.round((Date.now() - started) / 1000), error: lastError });
   }
 
   throw new Error(`Model failed to produce a valid response after 3 attempts: ${lastError}`);
 }
 
+// Structured answers for simple tasks; thinking is off unless asked for.
 export async function generateJson<T extends z.ZodType>(
   log: Log,
   model: string,
   schema: T,
   system: string,
   prompt: PromptContent,
+  options: GenerateOptions = { thinking: false },
 ): Promise<z.output<T>> {
   const schemaText = JSON.stringify(z.toJSONSchema(schema), null, 2);
   return generateParsed(
@@ -111,6 +128,6 @@ export async function generateJson<T extends z.ZodType>(
       if (!parsed.success) throw new Error(parsed.error.message);
       return parsed.data;
     },
-    "Return the corrected JSON object.",
+    { invalidHint: "Return the corrected JSON object.", ...options },
   );
 }
