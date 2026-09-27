@@ -13,6 +13,7 @@ const FFMPEG = process.env.FFMPEG_PATH ?? "ffmpeg";
 const FFPROBE = process.env.FFPROBE_PATH ?? "ffprobe";
 
 const MID_ANIMATION = /mid-?animation|in progress|being (written|drawn|created)|partially (written|drawn)|only (visible )?in frame/i;
+const NOT_A_PROBLEM = /^\s*(no (issues?|problems?|defects?)|none\b|nothing wrong)|\bno (issues?|problems?) (detected|found)\b/i;
 const PAIRS_PER_CALL = 4;
 const PAIR_GAP_SECONDS = 1;
 const MIN_FRAMES = 6;
@@ -115,6 +116,8 @@ export async function reviewVideo(log: Log, videoUrl: string): Promise<VisualRev
             .filter((issue) => issue.frame >= 1 && issue.frame <= batch.length)
             // Anything not in both frames, or described as unfinished, is an animation in progress.
             .filter((issue) => issue.visibleInBoth && !MID_ANIMATION.test(issue.problem))
+            // The model sometimes lists "no issues detected" as an issue.
+            .filter((issue) => !NOT_A_PROBLEM.test(issue.problem))
             .map((issue) => ({ time: batch[issue.frame - 1].time, problem: issue.problem, severity: issue.severity }));
         } catch (e) {
           log.warn("Frame review batch failed", { error: String(e) });
